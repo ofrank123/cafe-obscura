@@ -1,7 +1,7 @@
 let memory;
 
-const width = 1280;
-const height = 720;
+const width = 1140;
+const height = 640;
 
 const scale = `vec2(${width / 2.0}, ${height / 2.0})`;
 
@@ -43,6 +43,21 @@ void main() {
 }
 `;
 
+const circle_fragmentShader = `
+precision mediump float;
+
+varying highp vec2 v_textureCoord;
+uniform vec4 u_color;
+
+void main() {
+    float dist = distance(v_textureCoord, vec2(0.5,0.5));
+
+    float radius = 0.5;
+    float eps = 0.005;
+    gl_FragColor = vec4(u_color.rgb, 1.0 - smoothstep(radius - eps, radius + eps, dist));
+}
+`;
+
 const readCharStr = (ptr, len) => {
   const bytes = new Uint8Array(memory.buffer, ptr, len);
   return new TextDecoder("utf-8").decode(bytes);
@@ -66,6 +81,7 @@ const shaders = [];
 const glPrograms = [];
 let texturedRectProgram;
 let rectProgram;
+let circleProgram;
 
 const glBuffers = [];
 let quadPositionBuffer;
@@ -130,6 +146,33 @@ function createRectProgram() {
     };
 }
 
+function createCircleProgram() {
+    const circleProgramId = createShaderProgram(
+        rect_vertexShader,
+        circle_fragmentShader,
+    );
+
+    circleProgram = {
+        id: circleProgramId,
+        attribs: {
+            position: gl.getAttribLocation(
+                glPrograms[circleProgramId],
+                "a_position"
+            ),
+        },
+        uniforms: {
+            rect: gl.getUniformLocation(
+                glPrograms[circleProgramId],
+                "u_rect",
+            ),
+            color: gl.getUniformLocation(
+                glPrograms[circleProgramId],
+                "u_color",
+            ),
+        }
+    };
+}
+
 const initGL = () => {
     gl.clearColor(0.1, 0.1, 0.1, 1.0);
     // gl.enable(gl.DEPTH_TEST);
@@ -139,6 +182,7 @@ const initGL = () => {
 
     createTexturedRectProgram();
     createRectProgram();
+    createCircleProgram();
 
     // Position Buffer
     const quadPositions = [ 
@@ -343,6 +387,36 @@ function drawRect(x, y, w, h, r, g, b, a) {
     );
 }
 
+/**
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ * @param {number} a
+ */
+function drawCircle(x, y, w, h, r, g, b, a) {
+    gl.useProgram(glPrograms[circleProgram.id]);
+    gl.enableVertexAttribArray(circleProgram.attribs.position);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadPositionBuffer);
+    gl.vertexAttribPointer(quadPositionBuffer, 2, gl.FLOAT, 0, 0, 0);
+
+    gl.uniform4fv(
+        circleProgram.uniforms.rect,
+        [x, y, w, h],
+    );
+
+    gl.uniform4fv(circleProgram.uniforms.color, [r, g, b, a]);
+
+    gl.drawArrays(
+        gl.TRIANGLE_FAN,
+        0,
+        4,
+    );
+}
+
 function clear() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 }
@@ -352,6 +426,7 @@ const env = {
     logExt,
     drawTextureRect,
     drawRect,
+    drawCircle,
     clear,
 };
 
@@ -366,9 +441,18 @@ const keycodes = {
     "KeyA": 1,
     "KeyS": 2,
     "KeyD": 3,
+    "MouseL": 4,
+    "MouseR": 5,
 }
 
-function registerEventHandlers(handler, gameState) {
+function captureMouse() {
+}
+
+function registerEventHandlers(handler, mouseHandler, gameState) {
+    window.addEventListener("click", () => {
+        canvas.requestPointerLock();
+    });
+
     window.addEventListener("keydown", event => {
         const keycode = keycodes[event.code];
 
@@ -382,6 +466,54 @@ function registerEventHandlers(handler, gameState) {
 
         if (keycode !== undefined) {
             handler(gameState, EventType__button_up, keycode);
+        }
+    });
+
+    window.addEventListener("mousedown", event => {
+        if (document.pointerLockElement === canvas) {
+            let keycode = undefined;
+
+            switch (event.button) {
+                case 0:
+                    keycode = keycodes["MouseL"];
+                    break;
+                case 1:
+                    keycode = keycodes["MouseR"];
+                    break;
+            }
+
+            if (keycode !== undefined) {
+                handler(gameState, EventType__button_down, keycode);
+            }
+        }
+    });
+
+    window.addEventListener("mouseup", event => {
+        if (document.pointerLockElement === canvas) {
+            let keycode = undefined;
+
+            switch (event.button) {
+                case 0:
+                    keycode = keycodes["MouseL"];
+                    break;
+                case 1:
+                    keycode = keycodes["MouseR"];
+                    break;
+            }
+
+            if (keycode !== undefined) {
+                handler(gameState, EventType__button_up, keycode);
+            }
+        }
+    });
+
+    window.addEventListener("mousemove", event => {
+        if (document.pointerLockElement === canvas) {
+            mouseHandler(
+                gameState,
+                event.movementX,
+                event.movementY,
+            );
         }
     });
 }
@@ -398,7 +530,8 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
     const onAnimationFrame = instance.exports.onAnimationFrame;
 
     const handleEvent = instance.exports.handleEvent;
-    registerEventHandlers(handleEvent, gameState);
+    const handleMouse = instance.exports.handleMouse;
+    registerEventHandlers(handleEvent, handleMouse, gameState);
 
     var prevTimestamp = 0;
 
@@ -415,7 +548,6 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
         prevTimestamp = timestamp;
         
         onAnimationFrame(gameState, timestamp);
-        // console.log(new Uint8Array(memory.buffer, gameState, 100));
         window.requestAnimationFrame(step);
     }
     window.requestAnimationFrame(step);
