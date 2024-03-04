@@ -56,60 +56,27 @@ pub const std_options = struct {
 //------------------------------
 //~ ojf: generico types
 
-pub const Vec2 = struct {
-    x: f32,
-    y: f32,
+pub const Vec2 = @Vector(2, f32);
 
-    pub fn normalize(self: Vec2) Vec2 {
-        const m = self.mag();
-        return .{
-            .x = self.x / m,
-            .y = self.y / m,
-        };
-    }
+pub fn splatF(f: f32) Vec2 {
+    return @splat(f);
+}
 
-    pub fn mag(self: Vec2) f32 {
-        return @sqrt(self.x * self.x + self.y * self.y);
-    }
+pub fn mag(vec: Vec2) f32 {
+    return @sqrt(vec[0] * vec[0] + vec[1] * vec[1]);
+}
 
-    pub fn addVec(a: Vec2, b: Vec2) Vec2 {
-        return .{ .x = a.x + b.x, .y = a.y + b.y };
-    }
+pub fn normalize(vec: Vec2) Vec2 {
+    return vec / splatF(mag(vec));
+}
 
-    pub fn subVec(a: Vec2, b: Vec2) Vec2 {
-        return .{ .x = a.x - b.x, .y = a.y - b.y };
-    }
+pub fn dot(a: Vec2, b: Vec2) f32 {
+    return a[0] * b[0] + a[1] * b[1];
+}
 
-    pub fn mulScalar(a: Vec2, s: f32) Vec2 {
-        return .{ .x = a.x * s, .y = a.y * s };
-    }
-
-    pub fn divScalar(a: Vec2, s: f32) Vec2 {
-        return .{ .x = a.x / s, .y = a.y / s };
-    }
-
-    pub fn min(a: Vec2, b: Vec2) Vec2 {
-        return .{
-            .x = @min(a.x, b.x),
-            .y = @min(a.y, b.y),
-        };
-    }
-
-    pub fn max(a: Vec2, b: Vec2) Vec2 {
-        return .{
-            .x = @max(a.x, b.x),
-            .y = @max(a.y, b.y),
-        };
-    }
-
-    pub fn clamp(a: Vec2, lower_bound: Vec2, upper_bound: Vec2) Vec2 {
-        return max(min(a, upper_bound), lower_bound);
-    }
-
-    pub fn dot(a: Vec2, b: Vec2) f32 {
-        return a.x * b.x + a.y * b.y;
-    }
-};
+pub fn clampVec(a: Vec2, lower_bound: Vec2, upper_bound: Vec2) Vec2 {
+    return @max(@min(a, upper_bound), lower_bound);
+}
 
 pub const Color = struct {
     r: f32,
@@ -218,7 +185,7 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .player = 0,
         .stoves = [_]?EntityID{null} ** max_stoves,
         .input = .{
-            .mouse_pos = .{ .x = 0, .y = 0 },
+            .mouse_pos = .{ 0, 0 },
             .mouse_clicked_frames = mouse_clicked_frames,
             .mouse_down = false,
             .mouse_moving_frames = 0,
@@ -242,11 +209,11 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         const w: f32 = @floatFromInt(game_state.width);
         //- ojf: counter
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = 200, .y = h / 2.0 },
-            .size = .{ .x = 80, .y = 400 },
+            .pos = .{ 200, h / 2.0 },
+            .size = .{ 80, 400 },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = 75, .y = 400 } },
+                .shape = .{ .aabb = .{ 75, 400 } },
                 .mask = .terrain,
             },
         });
@@ -256,17 +223,17 @@ export fn onInit(width: c_int, height: c_int) *GameState {
 
         //- ojf: tables
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = 425, .y = h / 2 },
-            .size = .{ .x = 100, .y = 300 },
+            .pos = .{ 425, h / 2 },
+            .size = .{ 100, 300 },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = 100, .y = 300 } },
+                .shape = .{ .aabb = .{ 100, 300 } },
                 .mask = .terrain,
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = 900, .y = 175 },
-            .size = .{ .x = 150, .y = 150 },
+            .pos = .{ 900, 175 },
+            .size = .{ 150, 150 },
             .shape = .circle,
             .collider = .{
                 .shape = .{ .circle = 150 },
@@ -274,8 +241,8 @@ export fn onInit(width: c_int, height: c_int) *GameState {
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = 900, .y = h - 175 },
-            .size = .{ .x = 150, .y = 150 },
+            .pos = .{ 900, h - 175 },
+            .size = .{ 150, 150 },
             .shape = .circle,
             .collider = .{
                 .shape = .{ .circle = 150 },
@@ -283,8 +250,8 @@ export fn onInit(width: c_int, height: c_int) *GameState {
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = 700, .y = h / 2 },
-            .size = .{ .x = 150, .y = 150 },
+            .pos = .{ 700, h / 2 },
+            .size = .{ 150, 150 },
             .shape = .circle,
             .collider = .{
                 .shape = .{ .circle = 150 },
@@ -294,38 +261,38 @@ export fn onInit(width: c_int, height: c_int) *GameState {
 
         //- ojf: walls
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = -50, .y = h / 2.0 },
-            .size = .{ .x = 120, .y = h },
+            .pos = .{ -50, h / 2.0 },
+            .size = .{ 120, h },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = 120, .y = h } },
+                .shape = .{ .aabb = .{ 120, h } },
                 .mask = .terrain,
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = w + 50, .y = h / 2.0 },
-            .size = .{ .x = 120, .y = h },
+            .pos = .{ w + 50, h / 2.0 },
+            .size = .{ 120, h },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = 120, .y = h } },
+                .shape = .{ .aabb = .{ 120, h } },
                 .mask = .terrain,
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = w / 2, .y = -50 },
-            .size = .{ .x = w, .y = 120 },
+            .pos = .{ w / 2, -50 },
+            .size = .{ w, 120 },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = w, .y = 120 } },
+                .shape = .{ .aabb = .{ w, 120 } },
                 .mask = .terrain,
             },
         });
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ .x = w / 2, .y = h + 50 },
-            .size = .{ .x = w, .y = 120 },
+            .pos = .{ w / 2, h + 50 },
+            .size = .{ w, 120 },
             .shape = .rect,
             .collider = .{
-                .shape = .{ .aabb = .{ .x = w, .y = 120 } },
+                .shape = .{ .aabb = .{ w, 120 } },
                 .mask = .terrain,
             },
         });
@@ -388,11 +355,7 @@ export fn handleMouse(
 ) void {
     game_state.input.mouse_moving_frames = mouse_moving_frames;
 
-    game_state.input.mouse_pos = game_state.input.mouse_pos
-        .addVec(.{
-        .x = x,
-        .y = -y,
-    });
+    game_state.input.mouse_pos = game_state.input.mouse_pos + Vec2{ x, -y };
 }
 
 //------------------------------

@@ -7,8 +7,10 @@ const entities = @import("./entities.zig");
 
 const Entity = entities.Entity;
 const EntityID = entities.EntityID;
-const Vec2 = main.Vec2;
 const GameState = main.GameState;
+
+const Vec2 = main.Vec2;
+const splatF = main.splatF;
 
 //------------------------------
 //~ ojf: collider management
@@ -115,11 +117,11 @@ inline fn collision_circleToCircle(
     other_pos: Vec2,
     other_radius: f32,
 ) ?Collision {
-    const diff = self_pos.subVec(other_pos);
-    const diff_mag = diff.mag();
+    const diff = self_pos - other_pos;
+    const diff_mag = main.mag(diff);
     if (diff_mag < self_radius + other_radius) {
         return Collision{
-            .normal = diff.divScalar(diff_mag),
+            .normal = diff / splatF(diff_mag),
             .penetration = self_radius + other_radius - diff_mag,
         };
     }
@@ -132,18 +134,19 @@ inline fn collision_circleToAabb(
     rect_pos: Vec2,
     rect_size: Vec2,
 ) ?Collision {
-    const half_extents = rect_size.divScalar(2);
-    const center_diff = circle_pos.subVec(rect_pos);
-    const clamped_diff = center_diff.clamp(
-        half_extents.mulScalar(-1),
+    const half_extents = rect_size / splatF(2);
+    const center_diff = circle_pos - rect_pos;
+    const clamped_diff = main.clampVec(
+        center_diff,
+        -half_extents,
         half_extents,
     );
-    const closest = clamped_diff.addVec(rect_pos);
-    const diff = circle_pos.subVec(closest);
-    const diff_mag = diff.mag();
+    const closest = clamped_diff + rect_pos;
+    const diff = circle_pos - closest;
+    const diff_mag = main.mag(diff);
     if (diff_mag < circle_radius) {
         return Collision{
-            .normal = diff.divScalar(diff_mag),
+            .normal = diff / splatF(diff_mag),
             .penetration = circle_radius - diff_mag,
         };
     }
@@ -156,43 +159,43 @@ inline fn collision_aabbToAabb(
     o_pos: Vec2,
     o_size: Vec2,
 ) ?Collision {
-    const s_left = s_pos.x - s_size.x / 2;
-    const s_right = s_pos.x + s_size.x / 2;
-    const s_top = s_pos.y + s_size.y / 2;
-    const s_bottom = s_pos.y - s_size.y / 2;
+    const s_left = s_pos[0] - s_size[0] / 2;
+    const s_right = s_pos[0] + s_size[0] / 2;
+    const s_top = s_pos[1] + s_size[1] / 2;
+    const s_bottom = s_pos[1] - s_size[1] / 2;
 
-    const o_left = o_pos.x - o_size.x / 2;
-    const o_right = o_pos.x + o_size.x / 2;
-    const o_top = o_pos.y + o_size.y / 2;
-    const o_bottom = o_pos.y - o_size.y / 2;
+    const o_left = o_pos[0] - o_size[0] / 2;
+    const o_right = o_pos[0] + o_size[0] / 2;
+    const o_top = o_pos[1] + o_size[1] / 2;
+    const o_bottom = o_pos[1] - o_size[1] / 2;
 
     if (s_left <= o_right and o_left <= s_right and
         o_bottom <= s_top and s_bottom <= o_top)
     {
-        const x_pen = if (s_pos.x > o_pos.x)
+        const x_pen = if (s_pos[0] > o_pos[0])
             o_right - s_left
         else
             s_right - o_left;
 
-        const y_pen = if (s_pos.y > o_pos.y)
+        const y_pen = if (s_pos[1] > o_pos[1])
             o_top - s_bottom
         else
             s_top - o_bottom;
 
         if (x_pen > y_pen) {
             return Collision{
-                .normal = if (s_pos.y > o_pos.y)
-                    Vec2{ .x = 0, .y = 1 }
+                .normal = if (s_pos[1] > o_pos[1])
+                    .{ 0, 1 }
                 else
-                    Vec2{ .x = 0, .y = -1 },
+                    .{ 0, -1 },
                 .penetration = y_pen,
             };
         } else {
             return Collision{
-                .normal = if (s_pos.x > o_pos.x)
-                    Vec2{ .x = 1, .y = 0 }
+                .normal = if (s_pos[0] > o_pos[0])
+                    .{ 1, 0 }
                 else
-                    Vec2{ .x = -1, .y = 0 },
+                    .{ -1, 0 },
                 .penetration = x_pen,
             };
         }

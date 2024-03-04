@@ -65,19 +65,19 @@ pub const RenderCommand = union(RenderCommandTag) {
         switch (self) {
             .sprite => |sprite| {
                 bind.drawTextureRect(
-                    sprite.pos.x - sprite.size.x / 2.0,
-                    sprite.pos.y - sprite.size.y / 2.0,
-                    sprite.size.x,
-                    sprite.size.y,
+                    sprite.pos[0] - sprite.size[0] / 2.0,
+                    sprite.pos[1] - sprite.size[1] / 2.0,
+                    sprite.size[0],
+                    sprite.size[1],
                     sprite.texture_id,
                 );
             },
             .rect => |rect| {
                 bind.drawRect(
-                    rect.pos.x - rect.size.x / 2.0,
-                    rect.pos.y - rect.size.y / 2.0,
-                    rect.size.x,
-                    rect.size.y,
+                    rect.pos[0] - rect.size[0] / 2.0,
+                    rect.pos[1] - rect.size[1] / 2.0,
+                    rect.size[0],
+                    rect.size[1],
                     rect.color.r,
                     rect.color.g,
                     rect.color.b,
@@ -86,10 +86,10 @@ pub const RenderCommand = union(RenderCommandTag) {
             },
             .borderRect => |borderRect| {
                 bind.drawBorderRect(
-                    borderRect.pos.x - borderRect.size.x / 2.0,
-                    borderRect.pos.y - borderRect.size.y / 2.0,
-                    borderRect.size.x,
-                    borderRect.size.y,
+                    borderRect.pos[0] - borderRect.size[0] / 2.0,
+                    borderRect.pos[1] - borderRect.size[1] / 2.0,
+                    borderRect.size[0],
+                    borderRect.size[1],
                     borderRect.border,
                     borderRect.color.r,
                     borderRect.color.g,
@@ -99,10 +99,10 @@ pub const RenderCommand = union(RenderCommandTag) {
             },
             .circle => |circle| {
                 bind.drawCircle(
-                    circle.pos.x - circle.size.x / 2.0,
-                    circle.pos.y - circle.size.y / 2.0,
-                    circle.size.x,
-                    circle.size.y,
+                    circle.pos[0] - circle.size[0] / 2.0,
+                    circle.pos[1] - circle.size[1] / 2.0,
+                    circle.size[0],
+                    circle.size[1],
                     circle.color.r,
                     circle.color.g,
                     circle.color.b,

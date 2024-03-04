@@ -67,13 +67,14 @@ const circle_fragmentShader = `
 precision mediump float;
 
 varying highp vec2 v_textureCoord;
+uniform highp vec4 u_rect;
 uniform vec4 u_color;
 
 void main() {
     float dist = distance(v_textureCoord, vec2(0.5,0.5));
 
     float radius = 0.5;
-    float eps = 0.005;
+    float eps = 0.5 / u_rect.w;
     gl_FragColor = vec4(
         u_color.rgb, 
         u_color.a * (1.0 - smoothstep(radius - eps, radius + eps, dist))
