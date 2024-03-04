@@ -31,6 +31,26 @@ void main() {
 }
 `;
 
+const borderRect_fragmentShader = `
+precision mediump float;
+
+varying highp vec2 v_textureCoord;
+
+uniform vec4 u_color;
+uniform highp vec4 u_rect;
+uniform float u_border;
+
+void main() {
+    vec2 coord = u_rect.zw * v_textureCoord;
+    if (u_border < coord.x && coord.x < u_rect.z - u_border &&
+        u_border < coord.y && coord.y < u_rect.w - u_border) {
+        discard;
+    } else {
+        gl_FragColor = u_color;
+    }
+}
+`;
+
 const texturedRect_fragmentShader = `
 precision mediump float;
 
@@ -54,7 +74,10 @@ void main() {
 
     float radius = 0.5;
     float eps = 0.005;
-    gl_FragColor = vec4(u_color.rgb, 1.0 - smoothstep(radius - eps, radius + eps, dist));
+    gl_FragColor = vec4(
+        u_color.rgb, 
+        u_color.a * (1.0 - smoothstep(radius - eps, radius + eps, dist))
+    );
 }
 `;
 
@@ -81,6 +104,7 @@ const shaders = [];
 const glPrograms = [];
 let texturedRectProgram;
 let rectProgram;
+let borderRectProgram;
 let circleProgram;
 
 const glBuffers = [];
@@ -146,6 +170,37 @@ function createRectProgram() {
     };
 }
 
+function createBorderRectProgram() {
+    const borderRectProgramId = createShaderProgram(
+        rect_vertexShader,
+        borderRect_fragmentShader,
+    );
+
+    borderRectProgram = {
+        id: borderRectProgramId,
+        attribs: {
+            position: gl.getAttribLocation(
+                glPrograms[borderRectProgramId],
+                "a_position"
+            ),
+        },
+        uniforms: {
+            rect: gl.getUniformLocation(
+                glPrograms[borderRectProgramId],
+                "u_rect",
+            ),
+            color: gl.getUniformLocation(
+                glPrograms[borderRectProgramId],
+                "u_color",
+            ),
+            border: gl.getUniformLocation(
+                glPrograms[borderRectProgramId],
+                "u_border",
+            ),
+        }
+    };
+}
+
 function createCircleProgram() {
     const circleProgramId = createShaderProgram(
         rect_vertexShader,
@@ -182,6 +237,7 @@ const initGL = () => {
 
     createTexturedRectProgram();
     createRectProgram();
+    createBorderRectProgram();
     createCircleProgram();
 
     // Position Buffer
@@ -392,6 +448,38 @@ function drawRect(x, y, w, h, r, g, b, a) {
  * @param {number} y
  * @param {number} w
  * @param {number} h
+ * @param {number} border
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ * @param {number} a
+ */
+function drawBorderRect(x, y, w, h, border, r, g, b, a) {
+    gl.useProgram(glPrograms[borderRectProgram.id]);
+    gl.enableVertexAttribArray(borderRectProgram.attribs.position);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadPositionBuffer);
+    gl.vertexAttribPointer(quadPositionBuffer, 2, gl.FLOAT, 0, 0, 0);
+
+    gl.uniform4fv(
+        borderRectProgram.uniforms.rect,
+        [x, y, w, h],
+    );
+
+    gl.uniform4fv(borderRectProgram.uniforms.color, [r, g, b, a]);
+    gl.uniform1f(borderRectProgram.uniforms.border, border);
+
+    gl.drawArrays(
+        gl.TRIANGLE_FAN,
+        0,
+        4,
+    );
+}
+
+/**
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
  * @param {number} r
  * @param {number} g
  * @param {number} b
@@ -426,6 +514,7 @@ const env = {
     logExt,
     drawTextureRect,
     drawRect,
+    drawBorderRect,
     drawCircle,
     clear,
 };

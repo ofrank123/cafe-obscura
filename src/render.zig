@@ -13,6 +13,7 @@ const Color = main.Color;
 pub const RenderCommandTag = enum {
     sprite,
     rect,
+    borderRect,
     circle,
 };
 
@@ -29,6 +30,13 @@ pub const RenderCommand = union(RenderCommandTag) {
         size: Vec2,
         color: Color,
     },
+    borderRect: struct {
+        z_index: i8,
+        pos: Vec2,
+        size: Vec2,
+        border: f32,
+        color: Color,
+    },
     circle: struct {
         z_index: i8,
         pos: Vec2,
@@ -41,11 +49,13 @@ pub const RenderCommand = union(RenderCommandTag) {
         const az = switch (a) {
             .sprite => |s| s.z_index,
             .rect => |s| s.z_index,
+            .borderRect => |s| s.z_index,
             .circle => |s| s.z_index,
         };
         const bz = switch (b) {
             .sprite => |s| s.z_index,
             .rect => |s| s.z_index,
+            .borderRect => |s| s.z_index,
             .circle => |s| s.z_index,
         };
         return std.math.order(az, bz);
@@ -72,6 +82,19 @@ pub const RenderCommand = union(RenderCommandTag) {
                     rect.color.g,
                     rect.color.b,
                     rect.color.a,
+                );
+            },
+            .borderRect => |borderRect| {
+                bind.drawBorderRect(
+                    borderRect.pos.x - borderRect.size.x / 2.0,
+                    borderRect.pos.y - borderRect.size.y / 2.0,
+                    borderRect.size.x,
+                    borderRect.size.y,
+                    borderRect.border,
+                    borderRect.color.r,
+                    borderRect.color.g,
+                    borderRect.color.b,
+                    borderRect.color.a,
                 );
             },
             .circle => |circle| {
@@ -123,6 +146,25 @@ pub fn drawRect(
         .z_index = z_index,
         .pos = pos,
         .size = size,
+        .color = color,
+    } }) catch {
+        std.log.err("Failed to add render command!", .{});
+    };
+}
+
+pub fn drawBorderRect(
+    game_state: *GameState,
+    pos: Vec2,
+    size: Vec2,
+    border: f32,
+    z_index: i8,
+    color: Color,
+) void {
+    game_state.render_queue.add(RenderCommand{ .borderRect = .{
+        .z_index = z_index,
+        .pos = pos,
+        .size = size,
+        .border = border,
         .color = color,
     } }) catch {
         std.log.err("Failed to add render command!", .{});

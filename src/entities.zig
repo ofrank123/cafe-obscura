@@ -20,7 +20,17 @@ pub const EntityShape = enum {
 
 pub const EntityTag = enum {
     player,
+    ingredient,
+    ingredient_bin,
+    stove,
     generic,
+};
+
+pub const Ingredient = enum {
+    red,
+    green,
+    blue,
+    purple,
 };
 
 pub const EntityID = u16;
@@ -33,6 +43,7 @@ pub const Entity = struct {
     size: Vec2 = .{ .x = 0, .y = 0 },
 
     //- ojf: gfx
+    z_index: i8 = 0,
     sprite: ?u32 = null,
     shape: ?EntityShape = null,
     color: ?Color = null,
@@ -45,6 +56,13 @@ pub const Entity = struct {
     collider: ?Collider = null,
     holding: ?EntityID = null,
 
+    //- ojf: food
+    ingredient: ?Ingredient = null,
+    ingredients: [main.max_ingredients]?Ingredient = [_]?Ingredient{null} ** main.max_ingredients,
+    num_ingredients: u8 = 0,
+    lit: bool = false,
+    dropped_time: ?f32 = null,
+
     pub fn process(self: *Entity, game_state: *GameState, delta: f32) void {
         if (!self.active) {
             return;
@@ -52,6 +70,9 @@ pub const Entity = struct {
 
         switch (self.tag) {
             .player => processPlayer(self, game_state, delta),
+            .ingredient => processIngredient(self, game_state, delta),
+            .ingredient_bin => processIngredientBin(self, game_state, delta),
+            .stove => processStove(self, game_state, delta),
             .generic => processGeneric(self, game_state, delta),
         }
     }
@@ -115,18 +136,189 @@ fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
 
     //- ojf: draw
     if (self.sprite) |sprite| {
-        render.drawSprite(game_state, self.pos, self.size, 0, sprite);
+        render.drawSprite(game_state, self.pos, self.size, self.z_index, sprite);
     } else if (self.shape) |shape| {
         const color = self.color orelse Color.white;
         switch (shape) {
             .rect => {
-                render.drawRect(game_state, self.pos, self.size, 0, color);
+                render.drawRect(game_state, self.pos, self.size, self.z_index, color);
             },
             .circle => {
-                render.drawCircle(game_state, self.pos, self.size, 0, color);
+                render.drawCircle(game_state, self.pos, self.size, self.z_index, color);
             },
         }
     }
+}
+
+//------------------------------
+//~ ojf: ingredients
+
+pub fn createIngredientBins(game_state: *GameState) void {
+    const top_right = Vec2{
+        .x = 200 - 20,
+        .y = @as(f32, @floatFromInt(game_state.height)) / 2 + 200 - 20,
+    };
+
+    _ = createEntity(game_state, Entity{
+        .tag = .ingredient_bin,
+        .pos = top_right,
+        .size = .{ .x = 40, .y = 40 },
+        .shape = .rect,
+        .ingredient = .red,
+        .color = Color.red,
+    });
+    _ = createEntity(game_state, Entity{
+        .tag = .ingredient_bin,
+        .pos = top_right.addVec(.{ .x = 40, .y = 0 }),
+        .size = .{ .x = 40, .y = 40 },
+        .shape = .rect,
+        .ingredient = .green,
+        .color = Color.green,
+    });
+    _ = createEntity(game_state, Entity{
+        .tag = .ingredient_bin,
+        .pos = top_right.addVec(.{ .x = 0, .y = -40 }),
+        .size = .{ .x = 40, .y = 40 },
+        .shape = .rect,
+        .ingredient = .blue,
+        .color = Color.blue,
+    });
+    _ = createEntity(game_state, Entity{
+        .tag = .ingredient_bin,
+        .pos = top_right.addVec(.{ .x = 40, .y = -40 }),
+        .size = .{ .x = 40, .y = 40 },
+        .shape = .rect,
+        .ingredient = .purple,
+        .color = Color.purple,
+    });
+}
+
+pub fn processIngredientBin(self: *Entity, game_state: *GameState, delta: f32) void {
+    const hoverBorder = 5;
+
+    if (self.isMouseHovering(game_state)) {
+        render.drawBorderRect(
+            game_state,
+            self.pos,
+            self.size.addVec(.{ .x = hoverBorder, .y = hoverBorder }),
+            5,
+            10,
+            Color.yellow,
+        );
+
+        if (game_state.input.wasMouseClicked()) {
+            const player = game_state.getPlayer();
+            if (player.holding == null) {
+                player.holding = createEntity(game_state, Entity{
+                    .tag = .ingredient,
+                    .pos = game_state.input.mouse_pos,
+                    .size = .{ .x = 32, .y = 32 },
+                    .z_index = 10,
+                    .shape = .circle,
+                    .color = self.color,
+                    .ingredient = self.ingredient,
+                });
+            }
+        }
+    }
+
+    processGeneric(self, game_state, delta);
+}
+
+pub fn processIngredient(self: *Entity, game_state: *GameState, delta: f32) void {
+    if (self.dropped_time) |*dropped_time| {
+        if (dropped_time.* <= 0) {
+            self.active = false;
+        }
+
+        if (self.color) |*color| {
+            color.a = 1 - (main.dropped_expiration - dropped_time.*) / main.dropped_expiration;
+        }
+
+        dropped_time.* -= delta;
+    }
+
+    processGeneric(self, game_state, delta);
+}
+
+//------------------------------
+//~ ojf: stoves
+
+pub fn createStoves(game_state: *GameState) void {
+    const spacing = 10;
+    const size = 64;
+    const middle_stove = Vec2{
+        .x = 200,
+        .y = @as(f32, @floatFromInt(game_state.height)) / 2.0,
+    };
+
+    game_state.stoves[0] = createEntity(game_state, Entity{
+        .tag = .stove,
+        .pos = middle_stove,
+        .size = .{ .x = size, .y = size },
+        .shape = .circle,
+        .color = Color.dark_grey,
+    });
+
+    game_state.stoves[1] = createEntity(game_state, Entity{
+        .tag = .stove,
+        .pos = middle_stove.addVec(.{ .x = 0, .y = size + spacing }),
+        .size = .{ .x = size, .y = size },
+        .shape = .circle,
+        .color = Color.dark_grey,
+    });
+
+    game_state.stoves[2] = createEntity(game_state, Entity{
+        .tag = .stove,
+        .pos = middle_stove.subVec(.{ .x = 0, .y = size + spacing }),
+        .size = .{ .x = size, .y = size },
+        .shape = .circle,
+        .color = Color.dark_grey,
+    });
+}
+
+pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
+    const food_radius = 20;
+
+    //- ojf: render foods
+    if (self.num_ingredients == 1) {
+        render.drawCircle(
+            game_state,
+            self.pos,
+            .{ .x = 16, .y = 16 },
+            5,
+            switch (self.ingredients[0].?) {
+                .red => Color.red,
+                .green => Color.green,
+                .blue => Color.blue,
+                .purple => Color.purple,
+            },
+        );
+    } else if (self.num_ingredients > 1) {
+        for (0..self.num_ingredients) |i| {
+            const radians = 2 * std.math.pi * @as(f32, @floatFromInt(i)) /
+                @as(f32, @floatFromInt(self.num_ingredients));
+            render.drawCircle(
+                game_state,
+                self.pos.addVec(
+                    Vec2.mulScalar(.{
+                        .x = @cos(radians),
+                        .y = @sin(radians),
+                    }, food_radius),
+                ),
+                .{ .x = 16, .y = 16 },
+                5,
+                switch (self.ingredients[i].?) {
+                    .red => Color.red,
+                    .green => Color.green,
+                    .blue => Color.blue,
+                    .purple => Color.purple,
+                },
+            );
+        }
+    }
+
+    processGeneric(self, game_state, delta);
 }
 
 //------------------------------
@@ -220,10 +412,6 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
             game_state.input.mouse_pos = player.pos.addVec(mouse_diff.mulScalar(100 / mouse_diff_mag));
         }
 
-        if (game_state.input.mouse_down) {
-            dlog("Mouse down", .{});
-        }
-
         const color = if (game_state.input.mouse_down) Color.blue else Color.green;
 
         render.drawCircle(
@@ -233,5 +421,39 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
             100,
             color,
         );
+
+        //- ojf: lock held thing to player's hand
+        if (player.holding) |held_id| {
+            const held = game_state.getEntity(held_id);
+            if (game_state.input.mouse_down) {
+                held.pos = game_state.input.mouse_pos;
+            } else l: {
+                defer player.holding = null;
+
+                //- ojf: try to drop it into a stove
+                for (game_state.stoves) |_stove_id| {
+                    const stove_id = _stove_id orelse {
+                        continue;
+                    };
+                    var stove = game_state.getEntity(stove_id);
+                    if (!stove.isMouseHovering(game_state)) {
+                        continue;
+                    }
+
+                    for (stove.ingredients, 0..) |ingredient, i| {
+                        if (ingredient == null) {
+                            stove.ingredients[i] = held.ingredient;
+                            stove.num_ingredients += 1;
+                            held.active = false;
+                            break :l;
+                        }
+                    }
+                    std.log.warn("Couldn't place ingredient, but found stove!", .{});
+                }
+
+                //- ojf: drop!
+                game_state.getEntity(held_id).dropped_time = main.dropped_expiration;
+            }
+        }
     }
 }

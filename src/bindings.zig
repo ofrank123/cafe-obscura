@@ -47,6 +47,18 @@ pub extern fn drawRect(
     a: f32,
 ) void;
 
+pub extern fn drawBorderRect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    border: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) void;
+
 pub extern fn drawCircle(
     x: f32,
     y: f32,

@@ -8,6 +8,7 @@ const collision = @import("./collision.zig");
 const render = @import("./render.zig");
 
 const Entity = entities.Entity;
+const EntityID = entities.EntityID;
 const Colliders = collision.Colliders;
 const RenderQueue = render.RenderQueue;
 
@@ -17,6 +18,10 @@ const RenderQueue = render.RenderQueue;
 pub const max_entities = 512;
 pub const mouse_clicked_frames = 5;
 pub const mouse_moving_frames = 5;
+
+pub const dropped_expiration = 5;
+pub const max_ingredients = 8;
+pub const max_stoves = 5;
 
 //------------------------------
 //~ ojf: logging
@@ -116,6 +121,8 @@ pub const Color = struct {
     pub const blue = fromHex(0x263cab);
     pub const green = fromHex(0x36a632);
     pub const purple = fromHex(0x732c91);
+    pub const yellow = fromHex(0xf5f06e);
+    pub const dark_grey = fromHex(0x1c1b18);
     pub const white = fromHex(0xffffff);
 
     pub inline fn fromHex(hex: u32) Color {
@@ -171,8 +178,19 @@ pub const GameState = struct {
     width: i32,
     height: i32,
 
+    player: EntityID,
+    stoves: [max_stoves]?EntityID,
+
     colliders: Colliders,
     entities: [max_entities]Entity,
+
+    pub inline fn getPlayer(self: *GameState) *Entity {
+        return &self.entities[self.player];
+    }
+
+    pub inline fn getEntity(self: *GameState, id: EntityID) *Entity {
+        return &self.entities[id];
+    }
 };
 
 //------------------------------
@@ -197,6 +215,8 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .previous_timestamp = 0,
         .width = width,
         .height = height,
+        .player = 0,
+        .stoves = [_]?EntityID{null} ** max_stoves,
         .input = .{
             .mouse_pos = .{ .x = 0, .y = 0 },
             .mouse_clicked_frames = mouse_clicked_frames,
@@ -215,22 +235,24 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .entities = std.mem.zeroes([max_entities]Entity),
     };
 
+    game_state.player = entities.createPlayer(game_state);
+
     {
         const h: f32 = @floatFromInt(game_state.height);
         const w: f32 = @floatFromInt(game_state.width);
-
-        _ = entities.createPlayer(game_state);
-
         //- ojf: counter
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ .x = 200, .y = h / 2.0 },
-            .size = .{ .x = 75, .y = 400 },
+            .size = .{ .x = 80, .y = 400 },
             .shape = .rect,
             .collider = .{
                 .shape = .{ .aabb = .{ .x = 75, .y = 400 } },
                 .mask = .terrain,
             },
         });
+
+        entities.createIngredientBins(game_state);
+        entities.createStoves(game_state);
 
         //- ojf: tables
         _ = entities.createEntity(game_state, Entity{
@@ -334,9 +356,6 @@ fn toggleInput(
         },
         .mouse_l => {
             input_state.mouse_down = state;
-
-            dlog("{}", .{state});
-
             if (state) {
                 input_state.mouse_clicked_frames = mouse_clicked_frames;
             }
