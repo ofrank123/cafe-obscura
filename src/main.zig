@@ -6,8 +6,10 @@ const bind = @import("./bindings.zig");
 const entities = @import("./entities.zig");
 const collision = @import("./collision.zig");
 const render = @import("./render.zig");
+const hud = @import("./hud.zig");
 
 const Entity = entities.Entity;
+const EntityTag = entities.EntityTag;
 const EntityID = entities.EntityID;
 const Colliders = collision.Colliders;
 const RenderQueue = render.RenderQueue;
@@ -21,7 +23,23 @@ pub const mouse_moving_frames = 5;
 
 pub const dropped_expiration = 5;
 pub const max_ingredients = 8;
+
 pub const max_stoves = 5;
+pub const stove_size = 64;
+
+pub const cooking_time = 5;
+pub const ingredient_spin_speed = 0.5;
+pub const dish_size = 32;
+
+pub const customer_spawn_time = 10;
+pub const customer_wait_time = 10;
+pub const customer_dialog_size = Vec2{ 64, 48 };
+pub const customer_dialog_offset = 40;
+
+pub const seat_offset_x = 16;
+pub const seat_offset_y = 30;
+pub const seat_dish_target_offset = 32;
+pub const seat_dish_target_size = 32;
 
 //------------------------------
 //~ ojf: logging
@@ -58,7 +76,7 @@ pub const std_options = struct {
 
 pub const Vec2 = @Vector(2, f32);
 
-pub fn splatF(f: f32) Vec2 {
+pub inline fn splatF(f: f32) Vec2 {
     return @splat(f);
 }
 
@@ -88,8 +106,11 @@ pub const Color = struct {
     pub const blue = fromHex(0x263cab);
     pub const green = fromHex(0x36a632);
     pub const purple = fromHex(0x732c91);
+    pub const orange = fromHex(0xe05600);
+    pub const brown = fromHex(0x4a2d1a);
     pub const yellow = fromHex(0xf5f06e);
     pub const dark_grey = fromHex(0x1c1b18);
+    pub const light_grey = fromHex(0x636363);
     pub const white = fromHex(0xffffff);
 
     pub inline fn fromHex(hex: u32) Color {
@@ -107,18 +128,31 @@ pub const Color = struct {
 
 const InputState = struct {
     mouse_pos: Vec2,
-    mouse_clicked_frames: u8,
-    mouse_down: bool,
     mouse_moving_frames: u8,
+
+    mouse_l_clicked_frames: u8,
+    mouse_l_down: bool,
+
+    mouse_r_clicked_frames: u8,
+    mouse_r_down: bool,
 
     forwards_down: bool,
     backwards_down: bool,
     left_down: bool,
     right_down: bool,
 
-    pub inline fn wasMouseClicked(self: *InputState) bool {
-        if (self.mouse_clicked_frames > 0) {
-            self.mouse_clicked_frames = 0;
+    pub inline fn wasLeftMouseClicked(self: *InputState) bool {
+        if (self.mouse_l_clicked_frames > 0) {
+            self.mouse_l_clicked_frames = 0;
+            return true;
+        }
+
+        return false;
+    }
+
+    pub inline fn wasRightMouseClicked(self: *InputState) bool {
+        if (self.mouse_r_clicked_frames > 0) {
+            self.mouse_r_clicked_frames = 0;
             return true;
         }
 
@@ -127,6 +161,62 @@ const InputState = struct {
 
     pub inline fn isMouseMoving(self: *InputState) bool {
         return self.mouse_moving_frames > 0;
+    }
+
+    pub fn isMouseHoveringCircle(self: *InputState, pos: Vec2, size: f32) bool {
+        return mag(pos - self.mouse_pos) < size / 2;
+    }
+
+    pub fn isMouseHoveringEntity(self: *InputState, entity: *Entity) bool {
+        if (entity.shape) |shape| {
+            const mouse_pos = self.mouse_pos;
+            switch (shape) {
+                .circle => {
+                    return self.isMouseHoveringCircle(entity.pos, entity.size[0]);
+                },
+                .rect => {
+                    const left = entity.pos[0] - entity.size[0] / 2;
+                    const right = entity.pos[0] + entity.size[0] / 2;
+                    const top = entity.pos[1] + entity.size[1] / 2;
+                    const bottom = entity.pos[1] - entity.size[1] / 2;
+
+                    return left < mouse_pos[0] and mouse_pos[0] < right and
+                        bottom < mouse_pos[1] and mouse_pos[1] < top;
+                },
+            }
+        }
+        return false;
+    }
+};
+
+pub const EntityTypeIterator = struct {
+    id: EntityID = 0,
+    tag: EntityTag,
+    game_state: *GameState,
+
+    pub fn next(
+        self: *EntityTypeIterator,
+    ) ?EntityID {
+        while (self.id < max_entities and
+            (self.game_state.getEntity(self.id).tag != self.tag or
+            !self.game_state.getEntity(self.id).active))
+        {
+            self.id += 1;
+        }
+
+        if (self.id >= max_entities) {
+            return null;
+        } else {
+            defer self.id += 1;
+            return self.id;
+        }
+    }
+
+    pub fn init(game_state: *GameState, tag: EntityTag) EntityTypeIterator {
+        return EntityTypeIterator{
+            .tag = tag,
+            .game_state = game_state,
+        };
     }
 };
 
@@ -146,7 +236,8 @@ pub const GameState = struct {
     height: i32,
 
     player: EntityID,
-    stoves: [max_stoves]?EntityID,
+
+    next_customer: f32,
 
     colliders: Colliders,
     entities: [max_entities]Entity,
@@ -158,6 +249,16 @@ pub const GameState = struct {
     pub inline fn getEntity(self: *GameState, id: EntityID) *Entity {
         return &self.entities[id];
     }
+};
+
+const MyOtherStruct = struct {
+    baz: bool,
+    bop: f64,
+};
+
+const MyStruct = struct {
+    foo: i32,
+    bar: f32,
 };
 
 //------------------------------
@@ -183,12 +284,14 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .width = width,
         .height = height,
         .player = 0,
-        .stoves = [_]?EntityID{null} ** max_stoves,
+        .next_customer = 0,
         .input = .{
             .mouse_pos = .{ 0, 0 },
-            .mouse_clicked_frames = mouse_clicked_frames,
-            .mouse_down = false,
             .mouse_moving_frames = 0,
+            .mouse_l_clicked_frames = mouse_clicked_frames,
+            .mouse_l_down = false,
+            .mouse_r_clicked_frames = mouse_clicked_frames,
+            .mouse_r_down = false,
             .forwards_down = false,
             .backwards_down = false,
             .left_down = false,
@@ -222,15 +325,41 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         entities.createStoves(game_state);
 
         //- ojf: tables
-        _ = entities.createEntity(game_state, Entity{
-            .pos = .{ 425, h / 2 },
-            .size = .{ 100, 300 },
-            .shape = .rect,
-            .collider = .{
-                .shape = .{ .aabb = .{ 100, 300 } },
-                .mask = .terrain,
-            },
-        });
+
+        { //- ojf: square table
+            const pos = Vec2{ 425, h / 2 };
+            const size = Vec2{ 100, 300 };
+            _ = entities.createEntity(game_state, Entity{
+                .pos = pos,
+                .size = size,
+                .shape = .rect,
+                .collider = .{
+                    .shape = .{ .aabb = .{ 100, 300 } },
+                    .mask = .terrain,
+                },
+            });
+
+            const left_x = pos[0] - size[0] / 2 - seat_offset_x;
+            const right_x = pos[0] + size[0] / 2 + seat_offset_x;
+
+            const seat_positions = [_]Vec2{
+                .{ left_x, pos[1] + size[1] / 2 - seat_offset_y },
+                .{ left_x, pos[1] },
+                .{ left_x, pos[1] - size[1] / 2 + seat_offset_y },
+                .{ right_x, pos[1] + size[1] / 2 - seat_offset_y },
+                .{ right_x, pos[1] },
+                .{ right_x, pos[1] - size[1] / 2 + seat_offset_y },
+            };
+            const dish_target_offsets = [_]Vec2{
+                .{ seat_dish_target_offset, 0 },
+            } ** 3 ++ [_]Vec2{
+                .{ -seat_dish_target_offset, 0 },
+            } ** 3;
+
+            for (seat_positions, dish_target_offsets) |seat_pos, dish_target| {
+                entities.createSeat(game_state, seat_pos, dish_target);
+            }
+        }
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ 900, 175 },
             .size = .{ 150, 150 },
@@ -249,8 +378,9 @@ export fn onInit(width: c_int, height: c_int) *GameState {
                 .mask = .terrain,
             },
         });
+
         _ = entities.createEntity(game_state, Entity{
-            .pos = .{ 700, h / 2 },
+            .pos = .{ 670, h / 2 },
             .size = .{ 150, 150 },
             .shape = .circle,
             .collider = .{
@@ -322,13 +452,17 @@ fn toggleInput(
             input_state.right_down = state;
         },
         .mouse_l => {
-            input_state.mouse_down = state;
+            dlog("{d:.2}", .{input_state.mouse_pos});
+            input_state.mouse_l_down = state;
             if (state) {
-                input_state.mouse_clicked_frames = mouse_clicked_frames;
+                input_state.mouse_l_clicked_frames = mouse_clicked_frames;
             }
         },
         .mouse_r => {
-            // pass
+            input_state.mouse_r_down = state;
+            if (state) {
+                input_state.mouse_r_clicked_frames = mouse_clicked_frames;
+            }
         },
     }
 }
@@ -373,21 +507,27 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
     game_state.render_queue = RenderQueue.init(game_state.temp_allocator, {});
 
     //- ojf: update input state
-    if (game_state.input.mouse_clicked_frames > 0) {
-        game_state.input.mouse_clicked_frames -= 1;
+    if (game_state.input.mouse_l_clicked_frames > 0) {
+        game_state.input.mouse_l_clicked_frames -= 1;
+    }
+    if (game_state.input.mouse_r_clicked_frames > 0) {
+        game_state.input.mouse_r_clicked_frames -= 1;
     }
     if (game_state.input.mouse_moving_frames > 0) {
         game_state.input.mouse_moving_frames -= 1;
     }
 
-    bind.clear();
+    entities.spawnCustomers(game_state, delta);
 
     //- ojf: update entities
     for (&game_state.entities) |*entity| {
         entity.process(game_state, delta);
     }
 
+    hud.drawHud(game_state);
+
     //- ojf: render
+    bind.clear();
     while (game_state.render_queue.removeOrNull()) |command| {
         command.execute();
     }

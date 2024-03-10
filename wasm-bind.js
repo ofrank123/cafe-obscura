@@ -354,8 +354,6 @@ function loadTexture(url_ptr, url_len) {
     };
     image.src = url;
 
-    console.log("TEST!");
-
     textures.push(texture);
     return textures.length - 1;
 }
@@ -567,7 +565,7 @@ function registerEventHandlers(handler, mouseHandler, gameState) {
                 case 0:
                     keycode = keycodes["MouseL"];
                     break;
-                case 1:
+                case 2:
                     keycode = keycodes["MouseR"];
                     break;
             }
@@ -586,7 +584,7 @@ function registerEventHandlers(handler, mouseHandler, gameState) {
                 case 0:
                     keycode = keycodes["MouseL"];
                     break;
-                case 1:
+                case 2:
                     keycode = keycodes["MouseR"];
                     break;
             }
@@ -615,7 +613,6 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
 
     memory = instance.exports.memory;
     const gameState = instance.exports.onInit(width, height);
-    console.log(new Uint8Array(memory.buffer, gameState, 100));
 
     const onAnimationFrame = instance.exports.onAnimationFrame;
 

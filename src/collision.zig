@@ -46,8 +46,6 @@ pub const ColliderList = struct {
     pub fn add(self: *ColliderList, entity: EntityID) void {
         assert(self.size < self.array.len);
 
-        dlog("Adding to collider list...", .{});
-
         self.array[self.size] = entity;
         self.size += 1;
     }
