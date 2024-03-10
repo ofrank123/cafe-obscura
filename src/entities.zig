@@ -29,6 +29,7 @@ pub const EntityTag = enum {
     dish,
     seat,
     customer,
+    projectile,
     generic,
 };
 
@@ -66,7 +67,11 @@ pub const CustomerData = struct {
     seat: EntityID,
     state: CustomerState,
     order: ?Dish,
+
+    //- ojf: clocks
     wait_time: f32,
+    fire_time: f32,
+    eat_time: f32,
 };
 
 pub const EntityID = u16;
@@ -125,6 +130,7 @@ pub const Entity = struct {
             .dish => processDish(self, game_state, delta),
             .seat => processSeat(self, game_state, delta),
             .customer => processCustomer(self, game_state, delta),
+            .projectile => processProjectile(self, game_state, delta),
             .generic => processGeneric(self, game_state, delta),
         }
     }
@@ -140,7 +146,8 @@ pub fn createEntity(game_state: *GameState, entity: Entity) EntityID {
                 break :id @intCast(i); //- ojf: we shouldn't have more than 2^16 entities..
             }
         }
-        @panic("No free entities!");
+        std.log.err("No free entities!", .{});
+        return main.max_entities - 1;
     };
     game_state.entities[id] = entity;
     game_state.entities[id].active = true;
@@ -150,13 +157,8 @@ pub fn createEntity(game_state: *GameState, entity: Entity) EntityID {
     }
 
     //- ojf: register collider
-    if (entity.collider) |collider| {
-        var collider_list: *ColliderList = switch (collider.mask) {
-            .terrain => &game_state.colliders.terrain,
-            .player => &game_state.colliders.player,
-        };
-
-        collider_list.add(id);
+    if (entity.collider != null) {
+        game_state.colliders.add(id);
     }
 
     return id;
@@ -174,6 +176,8 @@ fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
 
         dropped_time.* -= delta;
     }
+
+    self.pos += self.vel * splatF(delta);
 
     //- ojf: draw
     if (self.sprite) |sprite| {
@@ -504,6 +508,55 @@ pub fn processSeat(
 }
 
 //------------------------------
+//~ ojf: projectiles
+
+pub fn createProjectile(game_state: *GameState, pos: Vec2, vel: Vec2) void {
+    _ = createEntity(game_state, Entity{
+        .tag = .projectile,
+        .pos = pos,
+        .size = @splat(main.projectile_size),
+        .vel = vel,
+        .shape = .circle,
+        .z_index = 50,
+        .color = Color.red,
+        .collider = .{
+            .shape = .{
+                .circle = main.projectile_size,
+            },
+            .mask = .projectile,
+        },
+    });
+}
+
+pub fn processProjectile(
+    projectile: *Entity,
+    game_state: *GameState,
+    delta: f32,
+) void {
+    var collision_iter = collision.getCollisions(game_state, projectile);
+    if (projectile.pos[0] < -100 or
+        projectile.pos[1] < -100 or
+        projectile.pos[0] > @as(f32, @floatFromInt(game_state.width + 100)) or
+        projectile.pos[1] > @as(f32, @floatFromInt(game_state.height + 100)))
+    {
+        projectile.active = false;
+        return;
+    }
+
+    while (collision_iter.next()) |col| {
+        const entity_hit = game_state.getEntity(col.entity);
+        if (entity_hit.health > 0) {
+            entity_hit.health -= 1;
+        }
+
+        projectile.active = false;
+        return;
+    }
+
+    processGeneric(projectile, game_state, delta);
+}
+
+//------------------------------
 //~ ojf: customers
 
 pub fn spawnCustomers(game_state: *GameState, delta: f32) void {
@@ -540,6 +593,8 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
             .state = .ordering,
             .order = .poop,
             .wait_time = main.customer_wait_time,
+            .fire_time = 0,
+            .eat_time = main.customer_eat_time,
         },
     });
 }
@@ -597,11 +652,31 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                 data.state = .eating;
             }
 
+            if (data.fire_time <= 0) {
+                const player = game_state.getPlayer();
+                createProjectile(
+                    game_state,
+                    customer.pos,
+                    main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                );
+                data.fire_time = main.customer_fire_time;
+            } else {
+                data.fire_time -= delta;
+            }
+
             customer.color = Color.red;
             drawOrderDialog(game_state, order, customer.pos);
         },
         .eating => {
             customer.color = Color.green;
+
+            if (data.eat_time <= 0) {
+                customer.active = false;
+                seat.seat_data.?.occupied = false;
+                seat.dish = null;
+            } else {
+                data.eat_time -= delta;
+            }
         },
     }
 
@@ -665,11 +740,10 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
 
     //- ojf: collision
     {
-        for (game_state.colliders.terrain.items()) |id| {
-            if (collision.checkCollision(player, &game_state.entities[id])) |c| {
-                player.pos = player.pos + c.normal * splatF(c.penetration);
-                player.vel = player.vel - c.normal * splatF(main.dot(player.vel, c.normal));
-            }
+        var collision_iter = collision.getCollisions(game_state, player);
+        while (collision_iter.next()) |c| {
+            player.pos = player.pos + c.normal * splatF(c.penetration);
+            player.vel = player.vel - c.normal * splatF(main.dot(player.vel, c.normal));
         }
     }
 

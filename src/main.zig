@@ -11,7 +11,7 @@ const hud = @import("./hud.zig");
 const Entity = entities.Entity;
 const EntityTag = entities.EntityTag;
 const EntityID = entities.EntityID;
-const Colliders = collision.Colliders;
+const ColliderList = collision.ColliderList;
 const RenderQueue = render.RenderQueue;
 
 //------------------------------
@@ -33,13 +33,18 @@ pub const dish_size = 32;
 
 pub const customer_spawn_time = 10;
 pub const customer_wait_time = 10;
+pub const customer_eat_time = 15;
 pub const customer_dialog_size = Vec2{ 64, 48 };
 pub const customer_dialog_offset = 40;
+pub const customer_fire_time = 3;
 
 pub const seat_offset_x = 16;
 pub const seat_offset_y = 30;
 pub const seat_dish_target_offset = 32;
 pub const seat_dish_target_size = 32;
+
+pub const projectile_size = 12;
+pub const projectile_speed = 200;
 
 //------------------------------
 //~ ojf: logging
@@ -239,7 +244,7 @@ pub const GameState = struct {
 
     next_customer: f32,
 
-    colliders: Colliders,
+    colliders: ColliderList,
     entities: [max_entities]Entity,
 
     pub inline fn getPlayer(self: *GameState) *Entity {
@@ -298,10 +303,7 @@ export fn onInit(width: c_int, height: c_int) *GameState {
             .right_down = false,
         },
         .render_queue = RenderQueue.init(temp_allocator, {}),
-        .colliders = .{
-            .player = .{},
-            .terrain = .{},
-        },
+        .colliders = .{},
         .entities = std.mem.zeroes([max_entities]Entity),
     };
 
@@ -520,9 +522,14 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
     entities.spawnCustomers(game_state, delta);
 
     //- ojf: update entities
+    var active: u32 = 0;
     for (&game_state.entities) |*entity| {
         entity.process(game_state, delta);
+        if (entity.active) {
+            active += 1;
+        }
     }
+    dlog("{}", .{active});
 
     hud.drawHud(game_state);
 

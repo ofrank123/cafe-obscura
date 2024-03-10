@@ -28,6 +28,7 @@ pub const ColliderShape = union(ColliderShapeTag) {
 pub const ColliderMask = enum {
     player,
     terrain,
+    projectile,
 };
 
 pub const Collider = struct {
@@ -60,26 +61,81 @@ pub const ColliderList = struct {
     }
 };
 
-pub const Colliders = struct {
-    player: ColliderList,
-    terrain: ColliderList,
-};
-
 //------------------------------
 //~ ojf: collision testing
 
-const Collision = struct {
+pub const Collision = struct {
+    normal: Vec2,
+    penetration: f32,
+    entity: EntityID,
+};
+
+pub const CollisionIter = struct {
+    index: u16,
+    game_state: *GameState,
+    entity: *Entity,
+
+    pub fn next(self: *CollisionIter) ?Collision {
+        if (self.index >= self.game_state.colliders.size) {
+            return null;
+        }
+
+        for (self.game_state.colliders.items()[self.index..], 0..) |id, index| {
+            if (checkCollision(
+                self.entity,
+                self.game_state.getEntity(id),
+            )) |col| {
+                self.index = @intCast(index + 1);
+                return Collision{
+                    .normal = col.normal,
+                    .penetration = col.penetration,
+                    .entity = id,
+                };
+            }
+        }
+
+        self.index = self.game_state.colliders.size;
+
+        return null;
+    }
+};
+
+pub fn getCollisions(game_state: *GameState, entity: *Entity) CollisionIter {
+    return .{
+        .index = 0,
+        .game_state = game_state,
+        .entity = entity,
+    };
+}
+
+fn checkMasks(self: ColliderMask, other: ColliderMask) bool {
+    if (self == .player and other == .terrain) {
+        return true;
+    }
+
+    if (self == .projectile and other == .player) {
+        return true;
+    }
+
+    return false;
+}
+
+pub const CollisionResult = struct {
     normal: Vec2,
     penetration: f32,
 };
 
-pub fn checkCollision(self: *Entity, other: *Entity) ?Collision {
+pub fn checkCollision(self: *Entity, other: *Entity) ?CollisionResult {
     const self_collider = self.collider orelse {
         return null;
     };
     const other_collider = other.collider orelse {
         return null;
     };
+
+    if (!checkMasks(self_collider.mask, other_collider.mask)) {
+        return null;
+    }
 
     if (self_collider.shape == .aabb and other_collider.shape == .aabb) {
         return collision_aabbToAabb(
@@ -114,11 +170,11 @@ inline fn collision_circleToCircle(
     self_radius: f32,
     other_pos: Vec2,
     other_radius: f32,
-) ?Collision {
+) ?CollisionResult {
     const diff = self_pos - other_pos;
     const diff_mag = main.mag(diff);
     if (diff_mag < self_radius + other_radius) {
-        return Collision{
+        return CollisionResult{
             .normal = diff / splatF(diff_mag),
             .penetration = self_radius + other_radius - diff_mag,
         };
@@ -131,7 +187,7 @@ inline fn collision_circleToAabb(
     circle_radius: f32,
     rect_pos: Vec2,
     rect_size: Vec2,
-) ?Collision {
+) ?CollisionResult {
     const half_extents = rect_size / splatF(2);
     const center_diff = circle_pos - rect_pos;
     const clamped_diff = main.clampVec(
@@ -143,7 +199,7 @@ inline fn collision_circleToAabb(
     const diff = circle_pos - closest;
     const diff_mag = main.mag(diff);
     if (diff_mag < circle_radius) {
-        return Collision{
+        return CollisionResult{
             .normal = diff / splatF(diff_mag),
             .penetration = circle_radius - diff_mag,
         };
@@ -156,7 +212,7 @@ inline fn collision_aabbToAabb(
     s_size: Vec2,
     o_pos: Vec2,
     o_size: Vec2,
-) ?Collision {
+) ?CollisionResult {
     const s_left = s_pos[0] - s_size[0] / 2;
     const s_right = s_pos[0] + s_size[0] / 2;
     const s_top = s_pos[1] + s_size[1] / 2;
@@ -181,7 +237,7 @@ inline fn collision_aabbToAabb(
             s_top - o_bottom;
 
         if (x_pen > y_pen) {
-            return Collision{
+            return CollisionResult{
                 .normal = if (s_pos[1] > o_pos[1])
                     .{ 0, 1 }
                 else
@@ -189,7 +245,7 @@ inline fn collision_aabbToAabb(
                 .penetration = y_pen,
             };
         } else {
-            return Collision{
+            return CollisionResult{
                 .normal = if (s_pos[0] > o_pos[0])
                     .{ 1, 0 }
                 else
