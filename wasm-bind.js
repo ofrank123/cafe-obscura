@@ -5,10 +5,11 @@ const height = 640;
 
 const scale = `vec2(${width / 2.0}, ${height / 2.0})`;
 
-const rect_vertexShader = `
+const _rect_vertexShader = `
 attribute vec2 a_position;
 
 uniform vec4 u_rect;
+uniform float u_rot;
 
 varying highp vec2 v_textureCoord;
 
@@ -17,7 +18,29 @@ void main() {
     coord = coord * (u_rect.zw / vec2(${width / 2.0}, ${height / 2.0}));
     coord = coord + (u_rect.xy / vec2(${width / 2.0}, ${height / 2.0}));
     gl_Position = vec4(coord - vec2(1, 1), 0, 1);
-    v_textureCoord = a_position.xy;
+    v_textureCoord = vec2(a_position.x, 1.0 - a_position.y);
+}
+`;
+
+const rect_vertexShader = `
+attribute vec2 a_position;
+
+uniform vec4 u_rect;
+uniform float u_rot;
+
+varying highp vec2 v_textureCoord;
+
+void main() {
+    vec2 coord = a_position;
+    coord = coord * u_rect.zw;
+    coord -= (u_rect.zw) / 2.0;
+    coord *= mat2(cos(u_rot),-sin(u_rot),
+                  sin(u_rot), cos(u_rot));
+    coord += (u_rect.zw) / 2.0;
+    coord = coord + u_rect.xy;
+    coord /= vec2(${width / 2.0}, ${height / 2.0});
+    gl_Position = vec4(coord - vec2(1, 1), 0, 1);
+    v_textureCoord = vec2(a_position.x, 1.0 - a_position.y);
 }
 `;
 
@@ -135,6 +158,10 @@ function createTexturedRectProgram() {
             rect: gl.getUniformLocation(
                 glPrograms[texturedRectProgramId],
                 "u_rect",
+            ),
+            rot: gl.getUniformLocation(
+                glPrograms[texturedRectProgramId],
+                "u_rot",
             ),
             sampler: gl.getUniformLocation(
                 glPrograms[texturedRectProgramId],
@@ -386,11 +413,12 @@ const logExt = (logPtr, logLen, messageLevel) => {
 /**
  * @param {number} x
  * @param {number} y
+ * @param {number} r
  * @param {number} w
  * @param {number} h
  * @param {number} texture_index
  */
-function drawTextureRect(x, y, w, h, texture_id) {
+function drawTextureRect(x, y, r, w, h, texture_id) {
     gl.useProgram(glPrograms[texturedRectProgram.id]);
     gl.enableVertexAttribArray(texturedRectProgram.attribs.position);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadPositionBuffer);
@@ -399,6 +427,10 @@ function drawTextureRect(x, y, w, h, texture_id) {
     gl.uniform4fv(
         texturedRectProgram.uniforms.rect,
         [x, y, w, h],
+    );
+    gl.uniform1f(
+        texturedRectProgram.uniforms.rot,
+        r
     );
 
     gl.activeTexture(gl.TEXTURE0);

@@ -31,6 +31,7 @@ pub extern fn loadTexture(source: *const u8, len: c_uint) c_uint;
 pub extern fn drawTextureRect(
     x: f32,
     y: f32,
+    r: f32,
     w: f32,
     h: f32,
     texture_id: c_uint,

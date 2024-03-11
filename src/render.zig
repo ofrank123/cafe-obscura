@@ -22,6 +22,7 @@ pub const RenderCommand = union(RenderCommandTag) {
         z_index: i8,
         pos: Vec2,
         size: Vec2,
+        rotation: f32,
         texture_id: u32,
     },
     rect: struct {
@@ -67,6 +68,7 @@ pub const RenderCommand = union(RenderCommandTag) {
                 bind.drawTextureRect(
                     sprite.pos[0] - sprite.size[0] / 2.0,
                     sprite.pos[1] - sprite.size[1] / 2.0,
+                    sprite.rotation,
                     sprite.size[0],
                     sprite.size[1],
                     sprite.texture_id,
@@ -129,6 +131,26 @@ pub fn drawSprite(
         .z_index = z_index,
         .pos = pos,
         .size = size,
+        .rotation = 0,
+        .texture_id = texture_id,
+    } }) catch {
+        std.log.err("Failed to add render command!", .{});
+    };
+}
+
+pub fn drawSpriteRot(
+    game_state: *GameState,
+    pos: Vec2,
+    size: Vec2,
+    rotation: f32,
+    z_index: i8,
+    texture_id: u32,
+) void {
+    game_state.render_queue.add(RenderCommand{ .sprite = .{
+        .z_index = z_index,
+        .pos = pos,
+        .size = size,
+        .rotation = rotation,
         .texture_id = texture_id,
     } }) catch {
         std.log.err("Failed to add render command!", .{});

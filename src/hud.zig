@@ -12,9 +12,9 @@ const GameState = main.GameState;
 
 const hud_zindex = 110;
 
-const hud_health_offset = 32;
+const hud_health_offset = 48;
 const hud_health_spacing = 8;
-const hud_heart_size = 32;
+const hud_heart_size = 64;
 
 pub fn drawHud(game_state: *GameState) void {
     const player = game_state.getPlayer();
@@ -27,12 +27,13 @@ pub fn drawHud(game_state: *GameState) void {
     for (0..player.health) |i| {
         const heart_pos = top_right - splatF(hud_health_offset) -
             Vec2{ @floatFromInt(i * (hud_health_spacing + hud_heart_size)), 0 };
-        render.drawCircle(
+        render.drawSpriteRot(
             game_state,
             heart_pos,
             @splat(hud_heart_size),
+            -0.125 * std.math.pi,
             hud_zindex,
-            Color.red,
+            game_state.sprites.heart,
         );
     }
 }

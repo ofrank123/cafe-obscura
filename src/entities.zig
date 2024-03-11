@@ -50,6 +50,8 @@ pub const CookingData = struct {
     ingredients: [main.max_ingredients]?Ingredient,
     num_ingredients: u8,
     cook_time: f32,
+    fire_rot_time: f32,
+    fire_rot: f32,
 };
 
 pub const CustomerState = enum {
@@ -77,6 +79,7 @@ pub const CustomerData = struct {
 pub const EntityID = u16;
 
 pub const Entity = struct {
+    id: EntityID = 0,
     active: bool = false,
 
     tag: EntityTag = .generic,
@@ -109,6 +112,8 @@ pub const Entity = struct {
         .ingredients = [_]?Ingredient{null} ** main.max_ingredients,
         .num_ingredients = 0,
         .cook_time = 0,
+        .fire_rot_time = 0,
+        .fire_rot = 0,
     },
     dish: ?Dish = null,
 
@@ -134,6 +139,13 @@ pub const Entity = struct {
             .generic => processGeneric(self, game_state, delta),
         }
     }
+
+    pub fn destroy(self: *Entity, game_state: *GameState) void {
+        self.active = false;
+        if (self.collider != null) {
+            game_state.colliders.remove(self.id);
+        }
+    }
 };
 
 //------------------------------
@@ -150,6 +162,7 @@ pub fn createEntity(game_state: *GameState, entity: Entity) EntityID {
         return main.max_entities - 1;
     };
     game_state.entities[id] = entity;
+    game_state.entities[id].id = id;
     game_state.entities[id].active = true;
 
     if (entity.shape == .circle and entity.size[0] != entity.size[1]) {
@@ -167,7 +180,7 @@ pub fn createEntity(game_state: *GameState, entity: Entity) EntityID {
 fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
     if (self.dropped_time) |*dropped_time| {
         if (dropped_time.* <= 0) {
-            self.active = false;
+            self.destroy(game_state);
         }
 
         if (self.color) |*color| {
@@ -203,20 +216,12 @@ fn createIngredientBin(
     pos: Vec2,
     ingredient: Ingredient,
 ) void {
-    _ = createEntity(game_state, Entity{
-        .tag = .ingredient_bin,
-        .pos = pos,
-        .size = @splat(40),
-        .shape = .rect,
-        .z_index = 5,
-        .ingredient = ingredient,
-        .color = switch (ingredient) {
-            .red => Color.red,
-            .green => Color.green,
-            .blue => Color.blue,
-            .purple => Color.purple,
-        },
-    });
+    _ = createEntity(game_state, Entity{ .tag = .ingredient_bin, .pos = pos, .size = @splat(40), .shape = .rect, .z_index = 5, .ingredient = ingredient, .sprite = switch (ingredient) {
+        .red => game_state.sprites.red_bin,
+        .green => game_state.sprites.green_bin,
+        .blue => game_state.sprites.blue_bin,
+        .purple => game_state.sprites.purple_bin,
+    } });
 }
 
 pub fn createIngredientBins(game_state: *GameState) void {
@@ -275,6 +280,7 @@ fn createStove(game_state: *GameState, pos: Vec2) EntityID {
         .tag = .stove,
         .pos = pos,
         .size = @splat(main.stove_size),
+        .sprite = game_state.sprites.pan,
         .z_index = 10,
         .shape = .circle,
         .color = Color.dark_grey,
@@ -303,7 +309,6 @@ pub fn createStoves(game_state: *GameState) void {
 }
 
 pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
-    const food_radius = 20;
     const ingredient_size = 16;
 
     var state = &self.cooking_state;
@@ -354,7 +359,7 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
             const radians = 2 * std.math.pi * (rotation + state.ingredient_offset);
             render.drawCircle(
                 game_state,
-                self.pos + @as(Vec2, @splat(food_radius)) * Vec2{
+                self.pos + @as(Vec2, @splat(main.stove_ingredient_radius)) * Vec2{
                     @cos(radians),
                     @sin(radians),
                 },
@@ -370,15 +375,31 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
         }
     }
 
+    render.drawSprite(
+        game_state,
+        self.pos,
+        @splat(main.stove_ring_size),
+        3,
+        game_state.sprites.pan_ring,
+    );
+
     if (state.cooking) {
         //- ojf: draw fire
-        render.drawCircle(
+        render.drawSpriteRot(
             game_state,
             self.pos,
-            self.size + splatF(8),
+            @splat(main.stove_ring_size),
+            state.fire_rot,
             5,
-            Color.orange,
+            game_state.sprites.pan_fire,
         );
+
+        if (state.fire_rot_time <= 0) {
+            state.fire_rot = @rem(state.fire_rot + 0.5 * std.math.pi, 2 * std.math.pi);
+            state.fire_rot_time = main.stove_fire_rot_time;
+        } else {
+            state.fire_rot_time -= delta;
+        }
 
         //- ojf: rotate ingredients
         state.ingredient_offset += main.ingredient_spin_speed * delta;
@@ -468,10 +489,10 @@ pub fn createSeat(
     _ = createEntity(game_state, Entity{
         .tag = EntityTag.seat,
         .pos = pos,
-        .size = .{ 24, 24 },
+        .size = @splat(main.seat_size),
         .shape = .circle,
         .z_index = -1,
-        .color = Color.brown,
+        .sprite = game_state.sprites.seat,
         .seat_data = .{
             .occupied = false,
             .dish_target_offset = dish_target_offset,
@@ -491,12 +512,15 @@ pub fn processSeat(
 
     //- ojf: draw dish target
     if (data.occupied) {
-        render.drawCircle(
+        const rot = std.math.acos(main.dot(data.dish_target_offset, Vec2{ 1, 0 }) /
+            main.mag(data.dish_target_offset));
+        render.drawSpriteRot(
             game_state,
             seat.pos + data.dish_target_offset,
-            @splat(main.seat_dish_target_size),
+            @splat(main.seat_utensils_sprite_size),
+            rot,
             5,
-            Color.light_grey,
+            game_state.sprites.utensils,
         );
     }
 
@@ -539,7 +563,7 @@ pub fn processProjectile(
         projectile.pos[0] > @as(f32, @floatFromInt(game_state.width + 100)) or
         projectile.pos[1] > @as(f32, @floatFromInt(game_state.height + 100)))
     {
-        projectile.active = false;
+        projectile.destroy(game_state);
         return;
     }
 
@@ -549,7 +573,7 @@ pub fn processProjectile(
             entity_hit.health -= 1;
         }
 
-        projectile.active = false;
+        projectile.destroy(game_state);
         return;
     }
 
@@ -599,16 +623,16 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
     });
 }
 
-pub fn drawOrderDialog(game_state: *GameState, dish: Dish, pos: Vec2) void {
-    render.drawRect(
+pub fn drawOrderDialog(game_state: *GameState, dish: Dish, pos: Vec2, angry: bool) void {
+    render.drawSprite(
         game_state,
         pos + Vec2{ 0, main.customer_dialog_offset },
         main.customer_dialog_size,
         20,
-        Color.white,
+        if (angry) game_state.sprites.angry_dialog else game_state.sprites.dialog,
     );
 
-    drawDish(game_state, dish, pos + Vec2{ 0, main.customer_dialog_offset }, 25);
+    drawDish(game_state, dish, pos + Vec2{ 0, main.customer_dialog_offset + 2 }, 25);
 }
 
 pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) void {
@@ -626,7 +650,7 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                 std.log.warn("Customer is ordering but has no order!", .{});
                 return;
             };
-            drawOrderDialog(game_state, order, customer.pos);
+            drawOrderDialog(game_state, order, customer.pos, false);
 
             if (seat.dish) |dish| {
                 if (dish == order) {
@@ -654,24 +678,27 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
 
             if (data.fire_time <= 0) {
                 const player = game_state.getPlayer();
-                createProjectile(
-                    game_state,
-                    customer.pos,
-                    main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
-                );
-                data.fire_time = main.customer_fire_time;
+
+                //- ojf: only fire if outside of safe radius
+                if (main.mag(player.pos - customer.pos) > main.customer_safe_radius) {
+                    createProjectile(
+                        game_state,
+                        customer.pos,
+                        main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                    );
+                    data.fire_time = main.customer_fire_time;
+                }
             } else {
                 data.fire_time -= delta;
             }
 
-            customer.color = Color.red;
-            drawOrderDialog(game_state, order, customer.pos);
+            drawOrderDialog(game_state, order, customer.pos, true);
         },
         .eating => {
             customer.color = Color.green;
 
             if (data.eat_time <= 0) {
-                customer.active = false;
+                customer.destroy(game_state);
                 seat.seat_data.?.occupied = false;
                 seat.dish = null;
             } else {
@@ -822,7 +849,7 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
 
                             if (held.ingredient) |ingredient| {
                                 if (addIngredientToStove(stove, ingredient)) {
-                                    held.active = false;
+                                    held.destroy(game_state);
                                 }
                             }
                         }
@@ -837,7 +864,7 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
                                 main.seat_dish_target_size,
                             )) {
                                 seat.dish = held.dish;
-                                held.active = false;
+                                held.destroy(game_state);
                             }
                         }
                     },

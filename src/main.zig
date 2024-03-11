@@ -24,8 +24,16 @@ pub const mouse_moving_frames = 5;
 pub const dropped_expiration = 5;
 pub const max_ingredients = 8;
 
+pub const long_table_size = Vec2{ 120, 320 };
+pub const long_table_collider_size = Vec2{ 100, 300 };
+pub const round_table_size = 170;
+pub const round_table_collider_size = 150;
+
 pub const max_stoves = 5;
 pub const stove_size = 64;
+pub const stove_ring_size = 80;
+pub const stove_ingredient_radius = 16;
+pub const stove_fire_rot_time = 0.25;
 
 pub const cooking_time = 5;
 pub const ingredient_spin_speed = 0.5;
@@ -37,11 +45,14 @@ pub const customer_eat_time = 15;
 pub const customer_dialog_size = Vec2{ 64, 48 };
 pub const customer_dialog_offset = 40;
 pub const customer_fire_time = 3;
+pub const customer_safe_radius = 100;
 
-pub const seat_offset_x = 16;
+pub const seat_size = 32;
+pub const seat_offset_x = 20;
 pub const seat_offset_y = 30;
-pub const seat_dish_target_offset = 32;
-pub const seat_dish_target_size = 32;
+pub const seat_dish_target_offset = 44;
+pub const seat_dish_target_size = 80;
+pub const seat_utensils_sprite_size = 60;
 
 pub const projectile_size = 12;
 pub const projectile_speed = 200;
@@ -194,6 +205,50 @@ const InputState = struct {
     }
 };
 
+pub const TextureID = u32;
+
+pub const Sprites = struct {
+    long_table: TextureID,
+    round_table: TextureID,
+    pan: TextureID,
+    pan_ring: TextureID,
+    pan_fire: TextureID,
+    heart: TextureID,
+    counter: TextureID,
+    red_bin: TextureID,
+    green_bin: TextureID,
+    purple_bin: TextureID,
+    blue_bin: TextureID,
+    seat: TextureID,
+    dialog: TextureID,
+    angry_dialog: TextureID,
+    utensils: TextureID,
+};
+
+fn loadSprite(path: []const u8) TextureID {
+    return bind.loadTexture(&path[0], path.len);
+}
+
+fn loadSprites() Sprites {
+    return Sprites{
+        .long_table = loadSprite("/assets/long_table.png"),
+        .round_table = loadSprite("/assets/round_table.png"),
+        .pan = loadSprite("/assets/pan.png"),
+        .pan_ring = loadSprite("/assets/pan_ring.png"),
+        .pan_fire = loadSprite("/assets/pan_fire.png"),
+        .heart = loadSprite("/assets/heart.png"),
+        .counter = loadSprite("/assets/counter.png"),
+        .red_bin = loadSprite("/assets/red_bin.png"),
+        .blue_bin = loadSprite("/assets/blue_bin.png"),
+        .purple_bin = loadSprite("/assets/purple_bin.png"),
+        .green_bin = loadSprite("/assets/green_bin.png"),
+        .seat = loadSprite("/assets/seat.png"),
+        .dialog = loadSprite("/assets/dialog.png"),
+        .angry_dialog = loadSprite("/assets/angry_dialog.png"),
+        .utensils = loadSprite("/assets/utensils.png"),
+    };
+}
+
 pub const EntityTypeIterator = struct {
     id: EntityID = 0,
     tag: EntityTag,
@@ -235,6 +290,8 @@ pub const GameState = struct {
     temp_allocator: std.mem.Allocator,
 
     render_queue: RenderQueue,
+
+    sprites: Sprites,
 
     previous_timestamp: i32,
     width: i32,
@@ -280,6 +337,8 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         @panic("Failed to allocate game state!");
     };
 
+    const sprites = loadSprites();
+
     game_state.* = GameState{
         .arena = arena,
         .allocator = allocator,
@@ -290,6 +349,7 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .height = height,
         .player = 0,
         .next_customer = 0,
+        .sprites = sprites,
         .input = .{
             .mouse_pos = .{ 0, 0 },
             .mouse_moving_frames = 0,
@@ -315,8 +375,9 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         //- ojf: counter
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ 200, h / 2.0 },
-            .size = .{ 80, 400 },
+            .size = .{ 100, 420 },
             .shape = .rect,
+            .sprite = sprites.counter,
             .collider = .{
                 .shape = .{ .aabb = .{ 75, 400 } },
                 .mask = .terrain,
@@ -330,17 +391,18 @@ export fn onInit(width: c_int, height: c_int) *GameState {
 
         { //- ojf: square table
             const pos = Vec2{ 425, h / 2 };
-            const size = Vec2{ 100, 300 };
             _ = entities.createEntity(game_state, Entity{
                 .pos = pos,
-                .size = size,
+                .size = long_table_size,
                 .shape = .rect,
+                .sprite = sprites.long_table,
                 .collider = .{
-                    .shape = .{ .aabb = .{ 100, 300 } },
+                    .shape = .{ .aabb = long_table_collider_size },
                     .mask = .terrain,
                 },
             });
 
+            const size = long_table_collider_size;
             const left_x = pos[0] - size[0] / 2 - seat_offset_x;
             const right_x = pos[0] + size[0] / 2 + seat_offset_x;
 
@@ -364,29 +426,32 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         }
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ 900, 175 },
-            .size = .{ 150, 150 },
+            .size = @splat(round_table_size),
             .shape = .circle,
+            .sprite = sprites.round_table,
             .collider = .{
-                .shape = .{ .circle = 150 },
+                .shape = .{ .circle = round_table_collider_size },
                 .mask = .terrain,
             },
         });
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ 900, h - 175 },
-            .size = .{ 150, 150 },
+            .size = @splat(round_table_size),
             .shape = .circle,
+            .sprite = sprites.round_table,
             .collider = .{
-                .shape = .{ .circle = 150 },
+                .shape = .{ .circle = round_table_collider_size },
                 .mask = .terrain,
             },
         });
 
         _ = entities.createEntity(game_state, Entity{
             .pos = .{ 670, h / 2 },
-            .size = .{ 150, 150 },
+            .size = @splat(round_table_size),
             .shape = .circle,
+            .sprite = sprites.round_table,
             .collider = .{
-                .shape = .{ .circle = 150 },
+                .shape = .{ .circle = round_table_collider_size },
                 .mask = .terrain,
             },
         });
@@ -529,7 +594,7 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
             active += 1;
         }
     }
-    dlog("{}", .{active});
+    dlog("ACTIVE ENTITIES: {}", .{active});
 
     hud.drawHud(game_state);
 
