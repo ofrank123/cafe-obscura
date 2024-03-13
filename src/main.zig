@@ -673,6 +673,14 @@ export fn handleMouse(
     game_state.input.mouse_moving_frames = mouse_moving_frames;
 
     game_state.input.mouse_pos = game_state.input.mouse_pos + Vec2{ x, -y };
+    game_state.input.mouse_pos = clampVec(
+        game_state.input.mouse_pos,
+        Vec2{ -20, -20 },
+        Vec2{
+            @as(f32, @floatFromInt(game_state.width + 20)),
+            @as(f32, @floatFromInt(game_state.height)) + 20,
+        },
+    );
 }
 
 //------------------------------
