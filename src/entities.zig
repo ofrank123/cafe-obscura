@@ -85,6 +85,7 @@ pub const Entity = struct {
     tag: EntityTag = .generic,
     pos: Vec2 = .{ 0, 0 },
     size: Vec2 = .{ 0, 0 },
+    rot: f32 = 0,
 
     //- ojf: gfx
     z_index: i8 = 0,
@@ -194,7 +195,24 @@ fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
 
     //- ojf: draw
     if (self.sprite) |sprite| {
-        render.drawSprite(game_state, self.pos, self.size, self.z_index, sprite);
+        if (self.rot < 0.0001) {
+            render.drawSprite(
+                game_state,
+                self.pos,
+                self.size,
+                self.z_index,
+                sprite,
+            );
+        } else {
+            render.drawSpriteRot(
+                game_state,
+                self.pos,
+                self.size,
+                self.rot,
+                self.z_index,
+                sprite,
+            );
+        }
     } else if (self.shape) |shape| {
         const color = self.color orelse Color.white;
         switch (shape) {
@@ -255,10 +273,15 @@ pub fn processIngredientBin(self: *Entity, game_state: *GameState, delta: f32) v
                 player.holding = createEntity(game_state, Entity{
                     .tag = .ingredient,
                     .pos = game_state.input.mouse_pos,
-                    .size = @splat(32),
+                    .size = @splat(main.ingredient_size),
                     .z_index = 30,
                     .shape = .circle,
-                    .color = self.color,
+                    .sprite = switch (self.ingredient.?) {
+                        .red => game_state.sprites.red_ingredient,
+                        .green => game_state.sprites.green_ingredient,
+                        .blue => game_state.sprites.blue_ingredient,
+                        .purple => game_state.sprites.purple_ingredient,
+                    },
                     .ingredient = self.ingredient,
                 });
             }
@@ -308,8 +331,30 @@ pub fn createStoves(game_state: *GameState) void {
     );
 }
 
+fn drawStoveIngredient(
+    game_state: *GameState,
+    pos: Vec2,
+    rot: f32,
+    ingredient: Ingredient,
+) void {
+    render.drawSpriteRot(
+        game_state,
+        pos,
+        @splat(main.stove_ingredient_size),
+        rot,
+        20,
+        switch (ingredient) {
+            .red => game_state.sprites.red_ingredient,
+            .green => game_state.sprites.green_ingredient,
+            .blue => game_state.sprites.blue_ingredient,
+            .purple => game_state.sprites.purple_ingredient,
+        },
+    );
+}
+
 pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
     const ingredient_size = 16;
+    _ = ingredient_size;
 
     var state = &self.cooking_state;
 
@@ -340,37 +385,26 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
 
         drawDish(game_state, dish, self.pos, 15);
     } else if (state.num_ingredients == 1) {
-        render.drawCircle(
+        const radians = 2 * std.math.pi * state.ingredient_offset;
+        drawStoveIngredient(
             game_state,
             self.pos,
-            @splat(ingredient_size),
-            20,
-            switch (state.ingredients[0].?) {
-                .red => Color.red,
-                .green => Color.green,
-                .blue => Color.blue,
-                .purple => Color.purple,
-            },
+            -radians,
+            state.ingredients[0].?,
         );
     } else if (state.num_ingredients > 1) {
         for (0..state.num_ingredients) |i| {
             const rotation = @as(f32, @floatFromInt(i)) /
                 @as(f32, @floatFromInt(state.num_ingredients));
             const radians = 2 * std.math.pi * (rotation + state.ingredient_offset);
-            render.drawCircle(
+            drawStoveIngredient(
                 game_state,
                 self.pos + @as(Vec2, @splat(main.stove_ingredient_radius)) * Vec2{
                     @cos(radians),
                     @sin(radians),
                 },
-                @splat(ingredient_size),
-                20,
-                switch (state.ingredients[i].?) {
-                    .red => Color.red,
-                    .green => Color.green,
-                    .blue => Color.blue,
-                    .purple => Color.purple,
-                },
+                -radians,
+                state.ingredients[i].?,
             );
         }
     }
@@ -461,21 +495,24 @@ pub fn beginCooking(stove: *Entity) void {
 //~ ojf: dishes
 
 pub fn drawDish(game_state: *GameState, dish: Dish, pos: Vec2, z_index: i8) void {
-    const dishColor = switch (dish) {
-        .poop => Color.brown,
+    const sprite = switch (dish) {
+        .poop => game_state.sprites.dish_poop,
     };
 
-    render.drawCircle(
+    render.drawSprite(
         game_state,
         pos,
         @splat(main.dish_size),
         z_index,
-        dishColor,
+        sprite,
     );
 }
 
 pub fn processDish(dish: *Entity, game_state: *GameState, delta: f32) void {
-    processGeneric(dish, game_state, delta);
+    _ = delta;
+    if (dish.dish) |d| {
+        drawDish(game_state, d, dish.pos, dish.z_index);
+    }
 }
 
 //------------------------------
@@ -542,7 +579,7 @@ pub fn createProjectile(game_state: *GameState, pos: Vec2, vel: Vec2) void {
         .vel = vel,
         .shape = .circle,
         .z_index = 50,
-        .color = Color.red,
+        .sprite = game_state.sprites.projectile,
         .collider = .{
             .shape = .{
                 .circle = main.projectile_size,
@@ -577,6 +614,10 @@ pub fn processProjectile(
         return;
     }
 
+    projectile.rot = @rem(
+        projectile.rot + delta * main.projectile_spin_speed,
+        2 * std.math.pi,
+    );
     processGeneric(projectile, game_state, delta);
 }
 
@@ -608,10 +649,10 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
     _ = createEntity(game_state, Entity{
         .tag = .customer,
         .pos = seat.pos,
-        .size = .{ 32, 32 },
+        .size = @splat(main.customer_size),
         .shape = .circle,
         .z_index = 10,
-        .color = Color.purple,
+        .sprite = game_state.sprites.monster1,
         .customer_data = .{
             .seat = seat_id,
             .state = .ordering,
@@ -718,7 +759,7 @@ pub fn createPlayer(game_state: *GameState) EntityID {
         .tag = .player,
         .health = 3,
         .pos = .{ 100, @as(f32, @floatFromInt(game_state.height)) / 2.0 },
-        .size = @splat(128),
+        .size = @splat(100),
         .speed = 400,
         .acceleration = 2000,
         .collider = .{
@@ -776,18 +817,12 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
 
     //- ojf: sprite
     {
-        const sprite = player.sprite orelse id: {
-            const texture_path = "/assets/Little_Guy.png";
-            player.sprite = b.loadTexture(&texture_path[0], texture_path.len);
-            break :id player.sprite.?;
-        };
-
         render.drawSprite(
             game_state,
             player.pos,
             player.size,
             10,
-            sprite,
+            game_state.sprites.player,
         );
     }
 
@@ -799,18 +834,21 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
         }
         const mouse_diff = game_state.input.mouse_pos - player.pos;
         const mouse_diff_mag = main.mag(mouse_diff);
-        if (mouse_diff_mag > 100) {
-            game_state.input.mouse_pos = player.pos + mouse_diff * splatF(100 / mouse_diff_mag);
+        if (mouse_diff_mag > main.mouse_range) {
+            game_state.input.mouse_pos = player.pos + mouse_diff * splatF(main.mouse_range / mouse_diff_mag);
         }
 
-        const color = if (game_state.input.mouse_l_down) Color.blue else Color.green;
+        const sprite = if (game_state.input.mouse_l_down)
+            game_state.sprites.cursor_closed
+        else
+            game_state.sprites.cursor_open;
 
-        render.drawCircle(
+        render.drawSprite(
             game_state,
             game_state.input.mouse_pos,
-            .{ 16, 16 },
+            @splat(main.cursor_size),
             100,
-            color,
+            sprite,
         );
 
         //- ojf: secondary actions

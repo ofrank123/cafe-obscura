@@ -9,8 +9,9 @@ pub const KeyCode = enum(i32) {
     key_a = 1,
     key_s = 2,
     key_d = 3,
-    mouse_l = 4,
-    mouse_r = 5,
+    key_p = 4,
+    mouse_l = 5,
+    mouse_r = 6,
 };
 
 // --- DEBUG ---

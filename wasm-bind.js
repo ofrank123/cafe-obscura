@@ -121,8 +121,6 @@ const gl = canvas.getContext('webgl', {
     || canvas.getContext('experimental-webgl');
 gl.viewport(0, 0, canvas.width, canvas.height);
 
-const fpsCounter = document.getElementById("fps-display");
-
 // --- GLOBALS ---
 const shaders = [];
 const glPrograms = [];
@@ -561,8 +559,9 @@ const keycodes = {
     "KeyA": 1,
     "KeyS": 2,
     "KeyD": 3,
-    "MouseL": 4,
-    "MouseR": 5,
+    "KeyP": 4,
+    "MouseL": 5,
+    "MouseR": 6,
 }
 
 function captureMouse() {
@@ -654,16 +653,7 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
 
     var prevTimestamp = 0;
 
-    const updateFPSTime = 100;
-    var updateFPSTimeElapsed = -1;
-
     function step(timestamp) {
-        const delta = timestamp - prevTimestamp;
-        updateFPSTimeElapsed -= delta;
-        if(updateFPSTimeElapsed < 0) {
-            fpsCounter.innerText = `FPS: ${(1000/delta).toFixed(1)}`;
-            updateFPSTimeElapsed = updateFPSTime;
-        }
         prevTimestamp = timestamp;
         
         onAnimationFrame(gameState, timestamp);

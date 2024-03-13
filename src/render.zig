@@ -24,12 +24,14 @@ pub const RenderCommand = union(RenderCommandTag) {
         size: Vec2,
         rotation: f32,
         texture_id: u32,
+        next: ?*RenderCommand = null,
     },
     rect: struct {
         z_index: i8,
         pos: Vec2,
         size: Vec2,
         color: Color,
+        next: ?*RenderCommand = null,
     },
     borderRect: struct {
         z_index: i8,
@@ -37,13 +39,41 @@ pub const RenderCommand = union(RenderCommandTag) {
         size: Vec2,
         border: f32,
         color: Color,
+        next: ?*RenderCommand = null,
     },
     circle: struct {
         z_index: i8,
         pos: Vec2,
         size: Vec2,
         color: Color,
+        next: ?*RenderCommand = null,
     },
+
+    fn setNext(self: *RenderCommand, new_next: ?*RenderCommand) void {
+        switch (@as(RenderCommandTag, self.*)) {
+            .sprite => {
+                self.sprite.next = new_next;
+            },
+            .rect => {
+                self.rect.next = new_next;
+            },
+            .borderRect => {
+                self.borderRect.next = new_next;
+            },
+            .circle => {
+                self.circle.next = new_next;
+            },
+        }
+    }
+
+    fn getNext(self: RenderCommand) ?*RenderCommand {
+        return switch (self) {
+            .sprite => |s| s.next,
+            .rect => |s| s.next,
+            .borderRect => |s| s.next,
+            .circle => |s| s.next,
+        };
+    }
 
     pub fn compare(context: void, a: RenderCommand, b: RenderCommand) std.math.Order {
         _ = context;
@@ -115,7 +145,72 @@ pub const RenderCommand = union(RenderCommandTag) {
     }
 };
 
-pub const RenderQueue = std.PriorityQueue(RenderCommand, void, RenderCommand.compare);
+// pub const RenderQueue = std.PriorityQueue(RenderCommand, void, RenderCommand.compare);
+
+pub const RenderQueueIter = struct {
+    command: ?*RenderCommand,
+
+    pub fn init(queue: RenderQueue) RenderQueueIter {
+        return RenderQueueIter{
+            .command = queue.head,
+        };
+    }
+
+    pub fn next(self: *RenderQueueIter) ?RenderCommand {
+        if (self.command) |c| {
+            defer self.command = c.getNext();
+            return c.*;
+        }
+
+        return null;
+    }
+};
+
+pub const RenderQueue = struct {
+    allocator: std.mem.Allocator,
+    head: ?*RenderCommand,
+
+    pub fn init(allocator: std.mem.Allocator) RenderQueue {
+        return RenderQueue{
+            .allocator = allocator,
+            .head = null,
+        };
+    }
+
+    pub fn push(self: *RenderQueue, command: RenderCommand) !void {
+        var command_node = try self.allocator.create(RenderCommand);
+        command_node.* = command;
+
+        var prev_node: ?*RenderCommand = null;
+        var node = self.head;
+        while (node) |n| {
+            const cmp = RenderCommand.compare({}, n.*, command);
+            if (cmp == .gt) {
+                break;
+            }
+            prev_node = node;
+            node = n.getNext();
+        }
+
+        if (prev_node) |pn| {
+            pn.setNext(command_node);
+        } else {
+            self.head = command_node;
+        }
+        command_node.setNext(node);
+    }
+
+    pub fn pop(self: *RenderQueue) ?RenderCommand {
+        const head = self.head orelse {
+            return null;
+        };
+
+        var ret = head.*;
+        self.head = head.getNext();
+        self.allocator.destroy(head);
+        return ret;
+    }
+};
 
 //------------------------------
 //~ ojf: rendering helpers
@@ -127,7 +222,7 @@ pub fn drawSprite(
     z_index: i8,
     texture_id: u32,
 ) void {
-    game_state.render_queue.add(RenderCommand{ .sprite = .{
+    game_state.render_queue.push(RenderCommand{ .sprite = .{
         .z_index = z_index,
         .pos = pos,
         .size = size,
@@ -146,7 +241,7 @@ pub fn drawSpriteRot(
     z_index: i8,
     texture_id: u32,
 ) void {
-    game_state.render_queue.add(RenderCommand{ .sprite = .{
+    game_state.render_queue.push(RenderCommand{ .sprite = .{
         .z_index = z_index,
         .pos = pos,
         .size = size,
@@ -164,7 +259,7 @@ pub fn drawRect(
     z_index: i8,
     color: Color,
 ) void {
-    game_state.render_queue.add(RenderCommand{ .rect = .{
+    game_state.render_queue.push(RenderCommand{ .rect = .{
         .z_index = z_index,
         .pos = pos,
         .size = size,
@@ -182,7 +277,7 @@ pub fn drawBorderRect(
     z_index: i8,
     color: Color,
 ) void {
-    game_state.render_queue.add(RenderCommand{ .borderRect = .{
+    game_state.render_queue.push(RenderCommand{ .borderRect = .{
         .z_index = z_index,
         .pos = pos,
         .size = size,
@@ -200,7 +295,7 @@ pub fn drawCircle(
     z_index: i8,
     color: Color,
 ) void {
-    game_state.render_queue.add(RenderCommand{ .circle = .{
+    game_state.render_queue.push(RenderCommand{ .circle = .{
         .z_index = z_index,
         .pos = pos,
         .size = size,
