@@ -10,8 +10,9 @@ pub const KeyCode = enum(i32) {
     key_s = 2,
     key_d = 3,
     key_p = 4,
-    mouse_l = 5,
-    mouse_r = 6,
+    key_r = 5,
+    mouse_l = 6,
+    mouse_r = 7,
 };
 
 // --- DEBUG ---
@@ -35,6 +36,7 @@ pub extern fn drawTextureRect(
     r: f32,
     w: f32,
     h: f32,
+    a: f32,
     texture_id: c_uint,
 ) void;
 

@@ -40,9 +40,7 @@ pub const Ingredient = enum {
     purple,
 };
 
-pub const Dish = enum {
-    poop,
-};
+pub const Dish = enum { poop, balls, salad, soup, tentacles, organ, bigballs };
 
 pub const CookingData = struct {
     cooking: bool,
@@ -65,10 +63,20 @@ pub const SeatData = struct {
     dish_target_offset: Vec2,
 };
 
+pub const CustomerTag = enum {
+    single,
+    triple,
+    circle,
+};
+
 pub const CustomerData = struct {
+    tag: CustomerTag,
     seat: EntityID,
     state: CustomerState,
     order: ?Dish,
+
+    //- ojf: circle shoot
+    projectile_rot: f32,
 
     //- ojf: clocks
     wait_time: f32,
@@ -179,11 +187,12 @@ pub fn createEntity(game_state: *GameState, entity: Entity) EntityID {
 }
 
 fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
+    var alpha: f32 = 1.0;
     if (self.dropped_time) |*dropped_time| {
         if (dropped_time.* <= 0) {
             self.destroy(game_state);
         }
-
+        alpha = 1 - (main.dropped_expiration - dropped_time.*) / main.dropped_expiration;
         if (self.color) |*color| {
             color.a = 1 - (main.dropped_expiration - dropped_time.*) / main.dropped_expiration;
         }
@@ -196,13 +205,24 @@ fn processGeneric(self: *Entity, game_state: *GameState, delta: f32) void {
     //- ojf: draw
     if (self.sprite) |sprite| {
         if (self.rot < 0.0001) {
-            render.drawSprite(
-                game_state,
-                self.pos,
-                self.size,
-                self.z_index,
-                sprite,
-            );
+            if ((alpha - 1.0) < 0.0001) {
+                render.drawSpriteAlpha(
+                    game_state,
+                    self.pos,
+                    self.size,
+                    alpha,
+                    self.z_index,
+                    sprite,
+                );
+            } else {
+                render.drawSprite(
+                    game_state,
+                    self.pos,
+                    self.size,
+                    self.z_index,
+                    sprite,
+                );
+            }
         } else {
             render.drawSpriteRot(
                 game_state,
@@ -359,10 +379,6 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
     var state = &self.cooking_state;
 
     if (self.dish) |dish| {
-        const dishColor = switch (dish) {
-            .poop => Color.brown,
-        };
-
         //- ojf: pickup dish
         if (game_state.input.isMouseHoveringEntity(self) and
             game_state.input.wasLeftMouseClicked())
@@ -372,10 +388,10 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
                 player.holding = createEntity(game_state, Entity{
                     .tag = .dish,
                     .pos = game_state.input.mouse_pos,
-                    .size = @splat(32),
+                    .size = @splat(main.dish_size),
                     .z_index = 30,
                     .shape = .circle,
-                    .color = dishColor,
+                    .sprite = getDishSprite(game_state, dish),
                     .dish = dish,
                 });
             }
@@ -444,13 +460,67 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
         if (state.cook_time > 0) {
             state.cook_time -= delta;
         } else {
+            //- ojf: yandere dev-style recipes
+            var ingredients_red: u32 = 0;
+            var ingredients_green: u32 = 0;
+            var ingredients_blue: u32 = 0;
+            var ingredients_purple: u32 = 0;
+
+            for (state.ingredients[0..state.num_ingredients]) |ingredient| {
+                if (ingredient) |_ingredient| {
+                    switch (_ingredient) {
+                        .red => ingredients_red += 1,
+                        .green => ingredients_green += 1,
+                        .blue => ingredients_blue += 1,
+                        .purple => ingredients_purple += 1,
+                    }
+                }
+            }
+
+            if (ingredients_red == 1 and
+                ingredients_green == 1 and
+                ingredients_blue == 0 and
+                ingredients_purple == 0)
+            {
+                self.dish = .salad;
+            } else if (ingredients_red == 0 and
+                ingredients_green == 0 and
+                ingredients_blue == 1 and
+                ingredients_purple == 1)
+            {
+                self.dish = .balls;
+            } else if (ingredients_red == 0 and
+                ingredients_green == 1 and
+                ingredients_blue == 1 and
+                ingredients_purple == 1)
+            {
+                self.dish = .tentacles;
+            } else if (ingredients_red == 1 and
+                ingredients_green == 1 and
+                ingredients_blue == 1 and
+                ingredients_purple == 0)
+            {
+                self.dish = .soup;
+            } else if (ingredients_red == 1 and
+                ingredients_green == 1 and
+                ingredients_blue == 0 and
+                ingredients_purple == 2)
+            {
+                self.dish = .organ;
+            } else if (ingredients_red == 2 and
+                ingredients_green == 0 and
+                ingredients_blue == 2 and
+                ingredients_purple == 0)
+            {
+                self.dish = .bigballs;
+            } else {
+                self.dish = .poop;
+            }
+
             //- ojf: done cooking
             state.cooking = false;
             state.ingredient_offset = 0;
             state.num_ingredients = 0;
-
-            // TODO(ojf): add dishes!
-            self.dish = .poop;
         }
     }
 
@@ -494,25 +564,30 @@ pub fn beginCooking(stove: *Entity) void {
 //------------------------------
 //~ ojf: dishes
 
-pub fn drawDish(game_state: *GameState, dish: Dish, pos: Vec2, z_index: i8) void {
-    const sprite = switch (dish) {
+pub fn getDishSprite(game_state: *GameState, dish: Dish) main.TextureID {
+    return switch (dish) {
         .poop => game_state.sprites.dish_poop,
+        .salad => game_state.sprites.dish_salad,
+        .balls => game_state.sprites.dish_balls,
+        .tentacles => game_state.sprites.dish_tentacles,
+        .soup => game_state.sprites.dish_soup,
+        .organ => game_state.sprites.dish_organ,
+        .bigballs => game_state.sprites.dish_bigballs,
     };
+}
 
+pub fn drawDish(game_state: *GameState, dish: Dish, pos: Vec2, z_index: i8) void {
     render.drawSprite(
         game_state,
         pos,
         @splat(main.dish_size),
         z_index,
-        sprite,
+        getDishSprite(game_state, dish),
     );
 }
 
 pub fn processDish(dish: *Entity, game_state: *GameState, delta: f32) void {
-    _ = delta;
-    if (dish.dish) |d| {
-        drawDish(game_state, d, dish.pos, dish.z_index);
-    }
+    processGeneric(dish, game_state, delta);
 }
 
 //------------------------------
@@ -555,7 +630,7 @@ pub fn processSeat(
             game_state,
             seat.pos + data.dish_target_offset,
             @splat(main.seat_utensils_sprite_size),
-            rot,
+            -rot,
             5,
             game_state.sprites.utensils,
         );
@@ -630,19 +705,72 @@ pub fn spawnCustomers(game_state: *GameState, delta: f32) void {
     } else {
         game_state.next_customer = main.customer_spawn_time;
 
-        var seat_iterator = EntityTypeIterator.init(game_state, .seat);
-        while (seat_iterator.next()) |seat| {
-            if (!game_state.getEntity(seat).seat_data.?.occupied) {
+        const spawn_roll = game_state.rand.float(f32);
+
+        if (spawn_roll > main.customer_spawn_chance) {
+            var last_seat: ?EntityID = null;
+            var seat_iterator = EntityTypeIterator.init(game_state, .seat);
+            while (seat_iterator.next()) |seat| {
+                if (!game_state.getEntity(seat).seat_data.?.occupied) {
+                    const seat_roll: f32 = game_state.rand.float(f32);
+                    if (seat_roll < main.seat_pick_chance) {
+                        createCustomer(game_state, seat);
+                        return;
+                    }
+                    last_seat = seat;
+                }
+            }
+            if (last_seat) |seat| {
                 createCustomer(game_state, seat);
-                return;
+            } else {
+                std.log.warn("No free seats!", .{});
             }
         }
-
-        std.log.warn("No free seats!", .{});
     }
 }
 
 pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
+    const tag: CustomerTag = t: {
+        var roll = game_state.rand.float(f32);
+        if (roll < 0.1) {
+            break :t .circle;
+        } else if (roll < 0.4) {
+            break :t .triple;
+        } else {
+            break :t .single;
+        }
+    };
+
+    const sprite = switch (tag) {
+        .single => game_state.sprites.monster1,
+        .triple => game_state.sprites.monster2,
+        .circle => game_state.sprites.monster3,
+    };
+
+    const order: Dish = o: {
+        var roll = game_state.rand.float(f32);
+
+        if (roll < 0.2) {
+            break :o .salad;
+        }
+        if (roll < 0.4) {
+            break :o .balls;
+        }
+        if (roll < 0.55) {
+            break :o .tentacles;
+        }
+        if (roll < 0.7) {
+            break :o .soup;
+        }
+        if (roll < 0.8) {
+            break :o .organ;
+        }
+        if (roll < 0.9) {
+            break :o .bigballs;
+        }
+
+        break :o .poop;
+    };
     const seat = game_state.getEntity(seat_id);
     seat.seat_data.?.occupied = true;
 
@@ -652,11 +780,13 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
         .size = @splat(main.customer_size),
         .shape = .circle,
         .z_index = 10,
-        .sprite = game_state.sprites.monster1,
+        .sprite = sprite,
         .customer_data = .{
+            .tag = tag,
             .seat = seat_id,
             .state = .ordering,
-            .order = .poop,
+            .order = order,
+            .projectile_rot = 0,
             .wait_time = main.customer_wait_time,
             .fire_time = 0,
             .eat_time = main.customer_eat_time,
@@ -676,6 +806,33 @@ pub fn drawOrderDialog(game_state: *GameState, dish: Dish, pos: Vec2, angry: boo
     drawDish(game_state, dish, pos + Vec2{ 0, main.customer_dialog_offset + 2 }, 25);
 }
 
+fn customerCheckDish(game_state: *GameState, customer: *Entity, seat: *Entity, order: Dish) void {
+    if (seat.dish) |dish| {
+        if (dish == order) {
+            customer.customer_data.?.state = .eating;
+        } else {
+            customer.customer_data.?.state = .angry;
+
+            //- ojf: throw dish
+            seat.dish = null;
+            _ = createEntity(game_state, Entity{
+                .tag = .dish,
+                .pos = game_state.input.mouse_pos,
+                .vel = main.rot(
+                    @splat(main.customer_throw_velocity),
+                    2 * std.math.pi * game_state.rand.float(f32),
+                ),
+                .size = @splat(main.dish_size),
+                .z_index = 30,
+                .shape = .circle,
+                .sprite = getDishSprite(game_state, dish),
+                .dropped_time = main.dropped_expiration,
+                .dish = dish,
+            });
+        }
+    }
+}
+
 pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) void {
     const data = &(customer.customer_data orelse {
         std.log.warn("Customer has no customer data!", .{});
@@ -692,14 +849,7 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                 return;
             };
             drawOrderDialog(game_state, order, customer.pos, false);
-
-            if (seat.dish) |dish| {
-                if (dish == order) {
-                    data.state = .eating;
-                } else {
-                    data.state = .angry;
-                }
-            }
+            customerCheckDish(game_state, customer, seat, order);
 
             if (data.wait_time >= 0) {
                 data.wait_time -= delta;
@@ -713,21 +863,64 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                 return;
             };
 
-            if (seat.dish == order) {
-                data.state = .eating;
-            }
+            customerCheckDish(game_state, customer, seat, order);
 
             if (data.fire_time <= 0) {
+                if (data.tag == .circle) {
+                    data.fire_time = main.customer_circle_fire_time;
+                } else {
+                    data.fire_time = main.customer_fire_time;
+                }
                 const player = game_state.getPlayer();
 
                 //- ojf: only fire if outside of safe radius
                 if (main.mag(player.pos - customer.pos) > main.customer_safe_radius) {
-                    createProjectile(
-                        game_state,
-                        customer.pos,
-                        main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
-                    );
-                    data.fire_time = main.customer_fire_time;
+                    switch (data.tag) {
+                        .single => {
+                            createProjectile(
+                                game_state,
+                                customer.pos,
+                                main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                            );
+                        },
+                        .triple => {
+                            createProjectile(
+                                game_state,
+                                customer.pos,
+                                main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                            );
+                            createProjectile(
+                                game_state,
+                                customer.pos,
+                                main.rot(
+                                    main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                                    0.16 * std.math.pi,
+                                ),
+                            );
+                            createProjectile(
+                                game_state,
+                                customer.pos,
+                                main.rot(
+                                    main.normalize(player.pos - customer.pos) * splatF(main.projectile_speed),
+                                    -0.16 * std.math.pi,
+                                ),
+                            );
+                        },
+                        .circle => {
+                            createProjectile(
+                                game_state,
+                                customer.pos,
+                                main.rot(
+                                    Vec2{ -1, 0 } * splatF(main.projectile_speed),
+                                    data.projectile_rot,
+                                ),
+                            );
+                            data.projectile_rot = @rem(
+                                data.projectile_rot + 0.1 * std.math.pi,
+                                2 * std.math.pi,
+                            );
+                        },
+                    }
                 }
             } else {
                 data.fire_time -= delta;
@@ -757,7 +950,7 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
 pub fn createPlayer(game_state: *GameState) EntityID {
     return createEntity(game_state, Entity{
         .tag = .player,
-        .health = 3,
+        .health = 5,
         .pos = .{ 100, @as(f32, @floatFromInt(game_state.height)) / 2.0 },
         .size = @splat(100),
         .speed = 400,
@@ -892,17 +1085,22 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
                             }
                         }
                     },
-                    .dish => {
+                    .dish => drop: {
                         //- ojf: try to drop it on a plate
                         var seat_iter = EntityTypeIterator.init(game_state, .seat);
                         while (seat_iter.next()) |seat_id| {
                             var seat = game_state.getEntity(seat_id);
+                            var seat_data = seat.seat_data orelse {
+                                std.log.warn("seat has no seat data!", .{});
+                                break :drop;
+                            };
                             if (game_state.input.isMouseHoveringCircle(
                                 seat.pos + seat.seat_data.?.dish_target_offset,
                                 main.seat_dish_target_size,
-                            )) {
+                            ) and seat_data.occupied and seat.dish == null) {
                                 seat.dish = held.dish;
                                 held.destroy(game_state);
+                                break :drop;
                             }
                         }
                     },

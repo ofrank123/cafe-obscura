@@ -80,9 +80,12 @@ precision mediump float;
 varying highp vec2 v_textureCoord;
 
 uniform sampler2D u_sampler;
+uniform float u_alpha;
 
 void main() {
-    gl_FragColor = texture2D(u_sampler, v_textureCoord);
+    vec4 color = texture2D(u_sampler, v_textureCoord);
+    color.a = color.a * u_alpha;
+    gl_FragColor = color;
 }
 `;
 
@@ -160,6 +163,10 @@ function createTexturedRectProgram() {
             rot: gl.getUniformLocation(
                 glPrograms[texturedRectProgramId],
                 "u_rot",
+            ),
+            alpha: gl.getUniformLocation(
+                glPrograms[texturedRectProgramId],
+                "u_alpha",
             ),
             sampler: gl.getUniformLocation(
                 glPrograms[texturedRectProgramId],
@@ -363,19 +370,19 @@ function loadTexture(url_ptr, url_len) {
             image,
         );
 
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         // WebGL1 has different requirements for power of 2 images
         // vs. non power of 2 images so check if the image is a
         // power of 2 in both dimensions.
-        if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-            // Yes, it's a power of 2. Generate mips.
-            gl.generateMipmap(gl.TEXTURE_2D);
-        } else {
-            // No, it's not a power of 2. Turn off mips and set
-            // wrapping to clamp to edge
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        }
+        // if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+        //     // Yes, it's a power of 2. Generate mips.
+        //     gl.generateMipmap(gl.TEXTURE_2D);
+        // } else {
+        //     // No, it's not a power of 2. Turn off mips and set
+        //     // wrapping to clamp to edge
+        // }
     };
     image.src = url;
 
@@ -416,7 +423,7 @@ const logExt = (logPtr, logLen, messageLevel) => {
  * @param {number} h
  * @param {number} texture_index
  */
-function drawTextureRect(x, y, r, w, h, texture_id) {
+function drawTextureRect(x, y, r, w, h, a, texture_id) {
     gl.useProgram(glPrograms[texturedRectProgram.id]);
     gl.enableVertexAttribArray(texturedRectProgram.attribs.position);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadPositionBuffer);
@@ -429,6 +436,10 @@ function drawTextureRect(x, y, r, w, h, texture_id) {
     gl.uniform1f(
         texturedRectProgram.uniforms.rot,
         r
+    );
+    gl.uniform1f(
+        texturedRectProgram.uniforms.alpha,
+        a,
     );
 
     gl.activeTexture(gl.TEXTURE0);
@@ -560,8 +571,9 @@ const keycodes = {
     "KeyS": 2,
     "KeyD": 3,
     "KeyP": 4,
-    "MouseL": 5,
-    "MouseR": 6,
+    "KeyR": 5,
+    "MouseL": 6,
+    "MouseR": 7,
 }
 
 function captureMouse() {
@@ -643,7 +655,7 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
     initGL();
 
     memory = instance.exports.memory;
-    const gameState = instance.exports.onInit(width, height);
+    const gameState = instance.exports.onInit(width, height, (new Date()).getTime());
 
     const onAnimationFrame = instance.exports.onAnimationFrame;
 
@@ -651,11 +663,7 @@ fetchAndInstantiate('main.wasm', {env}).then(function(instance) {
     const handleMouse = instance.exports.handleMouse;
     registerEventHandlers(handleEvent, handleMouse, gameState);
 
-    var prevTimestamp = 0;
-
     function step(timestamp) {
-        prevTimestamp = timestamp;
-        
         onAnimationFrame(gameState, timestamp);
         window.requestAnimationFrame(step);
     }

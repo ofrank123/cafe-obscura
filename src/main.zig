@@ -40,23 +40,27 @@ pub const stove_fire_rot_time = 0.25;
 
 pub const cooking_time = 5;
 pub const ingredient_spin_speed = 0.5;
-pub const dish_size = 42;
+pub const dish_size = 48;
 
 pub const customer_size = 80;
-pub const customer_spawn_time = 10;
+pub const customer_spawn_time = 5;
+pub const customer_spawn_chance = 0.5;
 pub const customer_wait_time = 10;
 pub const customer_eat_time = 15;
 pub const customer_dialog_size = Vec2{ 80, 64 };
 pub const customer_dialog_offset = 60;
 pub const customer_fire_time = 3;
+pub const customer_circle_fire_time = 0.5;
 pub const customer_safe_radius = 100;
+pub const customer_throw_velocity = 100;
 
 pub const seat_size = 32;
 pub const seat_offset_x = 20;
 pub const seat_offset_y = 30;
 pub const seat_dish_target_offset = 44;
-pub const seat_dish_target_size = 80;
+pub const seat_dish_target_size = 64;
 pub const seat_utensils_sprite_size = 60;
+pub const seat_pick_chance = 0.125;
 
 pub const projectile_size = 32;
 pub const projectile_spin_speed = 20;
@@ -99,7 +103,7 @@ pub const std_options = struct {
 };
 
 //------------------------------
-//~ ojf: generico types
+//~ ojf: generico stuff
 
 pub const Vec2 = @Vector(2, f32);
 
@@ -117,6 +121,13 @@ pub fn normalize(vec: Vec2) Vec2 {
 
 pub fn dot(a: Vec2, b: Vec2) f32 {
     return a[0] * b[0] + a[1] * b[1];
+}
+
+pub inline fn rot(a: Vec2, theta: f32) Vec2 {
+    return Vec2{
+        a[0] * @cos(theta) - a[1] * @sin(theta),
+        a[0] * @sin(theta) + a[1] * @cos(theta),
+    };
 }
 
 pub fn clampVec(a: Vec2, lower_bound: Vec2, upper_bound: Vec2) Vec2 {
@@ -254,6 +265,20 @@ pub const Sprites = struct {
     monster2: TextureID,
     monster3: TextureID,
     dish_poop: TextureID,
+    dish_balls: TextureID,
+    dish_bigballs: TextureID,
+    dish_organ: TextureID,
+    dish_salad: TextureID,
+    dish_soup: TextureID,
+    dish_tentacles: TextureID,
+    recipe_overlay: TextureID,
+    recipe_poop: TextureID,
+    recipe_balls: TextureID,
+    recipe_bigballs: TextureID,
+    recipe_organ: TextureID,
+    recipe_salad: TextureID,
+    recipe_soup: TextureID,
+    recipe_tentacles: TextureID,
 };
 
 fn loadSprite(path: []const u8) TextureID {
@@ -292,7 +317,21 @@ fn loadSprites() Sprites {
         .monster1 = loadSprite("assets/monster1.png"),
         .monster2 = loadSprite("assets/monster2.png"),
         .monster3 = loadSprite("assets/monster3.png"),
+        .dish_balls = loadSprite("assets/dish_balls.png"),
+        .dish_bigballs = loadSprite("assets/dish_bigballs.png"),
+        .dish_organ = loadSprite("assets/dish_organ.png"),
+        .dish_salad = loadSprite("assets/dish_salad.png"),
+        .dish_soup = loadSprite("assets/dish_soup.png"),
+        .dish_tentacles = loadSprite("assets/dish_tentacles.png"),
         .dish_poop = loadSprite("assets/dish_poop.png"),
+        .recipe_overlay = loadSprite("assets/recipe_overlay.png"),
+        .recipe_balls = loadSprite("assets/balls_recipe.png"),
+        .recipe_bigballs = loadSprite("assets/bigballs_recipe.png"),
+        .recipe_organ = loadSprite("assets/organ_recipe.png"),
+        .recipe_salad = loadSprite("assets/salad_recipe.png"),
+        .recipe_soup = loadSprite("assets/soup_recipe.png"),
+        .recipe_tentacles = loadSprite("assets/tentacles_recipe.png"),
+        .recipe_poop = loadSprite("assets/poop_recipe.png"),
     };
 }
 
@@ -343,6 +382,8 @@ pub const GameState = struct {
 
     sprites: Sprites,
 
+    rand: std.rand.Random,
+
     previous_timestamp: i32,
     width: i32,
     height: i32,
@@ -376,7 +417,38 @@ const MyStruct = struct {
 //------------------------------
 //~ ojf: init
 
-export fn onInit(width: c_int, height: c_int) *GameState {
+fn createRoundTable(game_state: *GameState, pos: Vec2) void {
+    _ = entities.createEntity(game_state, Entity{
+        .pos = pos,
+        .size = @splat(round_table_size),
+        .shape = .circle,
+        .sprite = game_state.sprites.round_table,
+        .collider = .{
+            .shape = .{ .circle = round_table_collider_size },
+            .mask = .terrain,
+        },
+    });
+
+    const seat_positions = [_]Vec2{
+        .{ pos[0] - round_table_collider_size / 2 - seat_offset_x, pos[1] },
+        .{ pos[0] + round_table_collider_size / 2 + seat_offset_x, pos[1] },
+        .{ pos[0], pos[1] - round_table_collider_size / 2 - seat_offset_x },
+        .{ pos[0], pos[1] + round_table_collider_size / 2 + seat_offset_x },
+    };
+
+    const dish_target_offsets = [_]Vec2{
+        .{ seat_dish_target_offset, 0 },
+        .{ -seat_dish_target_offset, 0 },
+        .{ 0, seat_dish_target_offset },
+        .{ 0, -seat_dish_target_offset },
+    };
+
+    for (seat_positions, dish_target_offsets) |seat_pos, dish_target| {
+        entities.createSeat(game_state, seat_pos, dish_target);
+    }
+}
+
+export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     var allocator = arena.allocator();
 
@@ -386,6 +458,11 @@ export fn onInit(width: c_int, height: c_int) *GameState {
     var game_state: *GameState = allocator.create(GameState) catch {
         @panic("Failed to allocate game state!");
     };
+
+    var rng: *std.rand.DefaultPrng = allocator.create(std.rand.DefaultPrng) catch {
+        @panic("Failed to allocate prng");
+    };
+    rng.* = std.rand.DefaultPrng.init(@intCast(timestamp));
 
     const sprites = loadSprites();
 
@@ -402,6 +479,7 @@ export fn onInit(width: c_int, height: c_int) *GameState {
         .player = 0,
         .next_customer = 0,
         .sprites = sprites,
+        .rand = rng.random(),
         .input = .{
             .mouse_pos = .{ 0, 0 },
             .mouse_moving_frames = 0,
@@ -476,37 +554,11 @@ export fn onInit(width: c_int, height: c_int) *GameState {
                 entities.createSeat(game_state, seat_pos, dish_target);
             }
         }
-        _ = entities.createEntity(game_state, Entity{
-            .pos = .{ 900, 175 },
-            .size = @splat(round_table_size),
-            .shape = .circle,
-            .sprite = sprites.round_table,
-            .collider = .{
-                .shape = .{ .circle = round_table_collider_size },
-                .mask = .terrain,
-            },
-        });
-        _ = entities.createEntity(game_state, Entity{
-            .pos = .{ 900, h - 175 },
-            .size = @splat(round_table_size),
-            .shape = .circle,
-            .sprite = sprites.round_table,
-            .collider = .{
-                .shape = .{ .circle = round_table_collider_size },
-                .mask = .terrain,
-            },
-        });
-
-        _ = entities.createEntity(game_state, Entity{
-            .pos = .{ 670, h / 2 },
-            .size = @splat(round_table_size),
-            .shape = .circle,
-            .sprite = sprites.round_table,
-            .collider = .{
-                .shape = .{ .circle = round_table_collider_size },
-                .mask = .terrain,
-            },
-        });
+        {
+            createRoundTable(game_state, .{ 900, 175 });
+            createRoundTable(game_state, .{ 900, h - 175 });
+            createRoundTable(game_state, .{ 670, h / 2 });
+        }
 
         //- ojf: walls
         _ = entities.createEntity(game_state, Entity{
@@ -575,7 +627,7 @@ fn handleKeyEvent(
         .key_d => {
             input_state.right_down = state;
         },
-        .key_p => {
+        .key_r => {
             if (state) {
                 game_state.paused = !game_state.paused;
                 dlog("PAUSED: {}", .{game_state.paused});
@@ -594,6 +646,7 @@ fn handleKeyEvent(
                 input_state.mouse_r_clicked_frames = mouse_clicked_frames;
             }
         },
+        else => {},
     }
 }
 
@@ -765,6 +818,61 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
     var render_queue_iter = render.RenderQueueIter.init(game_state.render_queue);
     while (render_queue_iter.next()) |command| {
         command.execute();
+    }
+
+    if (paused_this_frame) {
+        render.drawSpriteImmediate(
+            Vec2{
+                @as(f32, @floatFromInt(game_state.width)) / 2.0,
+                @as(f32, @floatFromInt(game_state.height)) / 2.0,
+            },
+            Vec2{
+                792,
+                450,
+            },
+            game_state.sprites.recipe_overlay,
+        );
+
+        const top_left_recipe = Vec2{ 325, 425 };
+        const recipe_size = Vec2{ 374, 185 } / splatF(2.0);
+        const offset_x = 230;
+        const offset_y = 120;
+
+        render.drawSpriteImmediate(
+            top_left_recipe,
+            recipe_size,
+            game_state.sprites.recipe_salad,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ offset_x, 0 },
+            recipe_size,
+            game_state.sprites.recipe_balls,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ offset_x * 2, 0 },
+            recipe_size,
+            game_state.sprites.recipe_tentacles,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ 0, -offset_y },
+            recipe_size,
+            game_state.sprites.recipe_soup,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ offset_x, -offset_y },
+            recipe_size,
+            game_state.sprites.recipe_organ,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ offset_x * 2, -offset_y },
+            recipe_size,
+            game_state.sprites.recipe_bigballs,
+        );
+        render.drawSpriteImmediate(
+            top_left_recipe + Vec2{ offset_x, -offset_y * 2 },
+            recipe_size,
+            game_state.sprites.recipe_poop,
+        );
     }
 
     //- ojf: reset arena

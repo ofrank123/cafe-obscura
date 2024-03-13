@@ -14,7 +14,7 @@ const hud_zindex = 110;
 
 const hud_health_offset = 48;
 const hud_health_spacing = 8;
-const hud_heart_size = 64;
+const hud_heart_size = 48;
 
 pub fn drawHud(game_state: *GameState) void {
     const player = game_state.getPlayer();

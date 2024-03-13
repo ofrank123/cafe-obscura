@@ -23,6 +23,7 @@ pub const RenderCommand = union(RenderCommandTag) {
         pos: Vec2,
         size: Vec2,
         rotation: f32,
+        alpha: f32,
         texture_id: u32,
         next: ?*RenderCommand = null,
     },
@@ -101,6 +102,7 @@ pub const RenderCommand = union(RenderCommandTag) {
                     sprite.rotation,
                     sprite.size[0],
                     sprite.size[1],
+                    sprite.alpha,
                     sprite.texture_id,
                 );
             },
@@ -227,10 +229,26 @@ pub fn drawSprite(
         .pos = pos,
         .size = size,
         .rotation = 0,
+        .alpha = 1.0,
         .texture_id = texture_id,
     } }) catch {
         std.log.err("Failed to add render command!", .{});
     };
+}
+
+pub fn drawSpriteImmediate(
+    pos: Vec2,
+    size: Vec2,
+    texture_id: u32,
+) void {
+    (RenderCommand{ .sprite = .{
+        .z_index = 0,
+        .pos = pos,
+        .size = size,
+        .rotation = 0,
+        .alpha = 1.0,
+        .texture_id = texture_id,
+    } }).execute();
 }
 
 pub fn drawSpriteRot(
@@ -246,6 +264,27 @@ pub fn drawSpriteRot(
         .pos = pos,
         .size = size,
         .rotation = rotation,
+        .alpha = 1.0,
+        .texture_id = texture_id,
+    } }) catch {
+        std.log.err("Failed to add render command!", .{});
+    };
+}
+
+pub fn drawSpriteAlpha(
+    game_state: *GameState,
+    pos: Vec2,
+    size: Vec2,
+    alpha: f32,
+    z_index: i8,
+    texture_id: u32,
+) void {
+    game_state.render_queue.push(RenderCommand{ .sprite = .{
+        .z_index = z_index,
+        .pos = pos,
+        .size = size,
+        .rotation = 0,
+        .alpha = alpha,
         .texture_id = texture_id,
     } }) catch {
         std.log.err("Failed to add render command!", .{});
