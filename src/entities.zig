@@ -151,6 +151,9 @@ pub const Entity = struct {
 
     pub fn destroy(self: *Entity, game_state: *GameState) void {
         self.active = false;
+        if (self.tag == .customer) {
+            game_state.num_customers -= 1;
+        }
         if (self.collider != null) {
             game_state.colliders.remove(self.id);
         }
@@ -707,7 +710,13 @@ pub fn spawnCustomers(game_state: *GameState, delta: f32) void {
 
         const spawn_roll = game_state.rand.float(f32);
 
-        if (spawn_roll > main.customer_spawn_chance) {
+        const spawn_chance = (main.customer_spawn_chance - main.customer_min_spawn_chance) *
+            (0.5 + 0.5 * @sin(2.0 * std.math.pi * (1.0 / main.customer_spawn_period) * game_state.game_time)) + main.customer_min_spawn_chance;
+        dlog("{d:.2}", .{spawn_chance});
+
+        if (spawn_roll < spawn_chance and
+            game_state.num_customers < main.customer_spawn_cap)
+        {
             var last_seat: ?EntityID = null;
             var seat_iterator = EntityTypeIterator.init(game_state, .seat);
             while (seat_iterator.next()) |seat| {
@@ -773,6 +782,8 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
     };
     const seat = game_state.getEntity(seat_id);
     seat.seat_data.?.occupied = true;
+
+    game_state.num_customers += 1;
 
     _ = createEntity(game_state, Entity{
         .tag = .customer,
@@ -932,6 +943,11 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
             customer.color = Color.green;
 
             if (data.eat_time <= 0) {
+                game_state.score += switch (data.order.?) {
+                    .poop, .balls, .salad => 1,
+                    .soup, .tentacles => 3,
+                    .bigballs, .organ => 5,
+                };
                 customer.destroy(game_state);
                 seat.seat_data.?.occupied = false;
                 seat.dish = null;
@@ -952,12 +968,12 @@ pub fn createPlayer(game_state: *GameState) EntityID {
         .tag = .player,
         .health = 5,
         .pos = .{ 100, @as(f32, @floatFromInt(game_state.height)) / 2.0 },
-        .size = @splat(100),
+        .size = @splat(80),
         .speed = 400,
         .acceleration = 2000,
         .collider = .{
             .shape = .{
-                .circle = 64,
+                .circle = 50,
             },
             .mask = .player,
         },
@@ -965,6 +981,13 @@ pub fn createPlayer(game_state: *GameState) EntityID {
 }
 
 fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
+    //- ojf: game over
+    {
+        if (player.health <= 0) {
+            game_state.game_over = true;
+        }
+    }
+
     //- ojf: movement
     {
         if (game_state.input.forwards_down) {
@@ -1036,10 +1059,16 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
         else
             game_state.sprites.cursor_open;
 
-        render.drawSprite(
+        const sprite_direction = Vec2{ 1, 1.2 };
+        const dot = main.dot(mouse_diff, sprite_direction);
+        const det = mouse_diff[0] * sprite_direction[1] - mouse_diff[1] * sprite_direction[0];
+        const rot = -std.math.atan2(f32, det, dot);
+
+        render.drawSpriteRot(
             game_state,
             game_state.input.mouse_pos,
             @splat(main.cursor_size),
+            rot,
             100,
             sprite,
         );

@@ -42,9 +42,13 @@ pub const cooking_time = 5;
 pub const ingredient_spin_speed = 0.5;
 pub const dish_size = 48;
 
+pub const customer_spawn_time = 8;
+pub const customer_spawn_chance = 1.0;
+pub const customer_min_spawn_chance = 0.25;
+pub const customer_spawn_period = 120.0;
+pub const customer_spawn_cap = 5;
+
 pub const customer_size = 80;
-pub const customer_spawn_time = 5;
-pub const customer_spawn_chance = 0.5;
 pub const customer_wait_time = 10;
 pub const customer_eat_time = 15;
 pub const customer_dialog_size = Vec2{ 80, 64 };
@@ -71,6 +75,9 @@ pub const cursor_size = 64;
 
 pub const start_button_pos = Vec2{ 840, 180 };
 pub const start_button_size = Vec2{ 361, 82 };
+
+pub const replay_button_pos = Vec2{ 570, 90 };
+pub const replay_button_size = Vec2{ 361, 82 };
 
 //------------------------------
 //~ ojf: logging
@@ -279,6 +286,8 @@ pub const Sprites = struct {
     recipe_salad: TextureID,
     recipe_soup: TextureID,
     recipe_tentacles: TextureID,
+    digits: [10]TextureID,
+    game_over: TextureID,
 };
 
 fn loadSprite(path: []const u8) TextureID {
@@ -332,6 +341,19 @@ fn loadSprites() Sprites {
         .recipe_soup = loadSprite("assets/soup_recipe.png"),
         .recipe_tentacles = loadSprite("assets/tentacles_recipe.png"),
         .recipe_poop = loadSprite("assets/poop_recipe.png"),
+        .game_over = loadSprite("assets/game_over.png"),
+        .digits = [10]TextureID{
+            loadSprite("assets/zero.png"),
+            loadSprite("assets/one.png"),
+            loadSprite("assets/two.png"),
+            loadSprite("assets/three.png"),
+            loadSprite("assets/four.png"),
+            loadSprite("assets/five.png"),
+            loadSprite("assets/six.png"),
+            loadSprite("assets/seven.png"),
+            loadSprite("assets/eight.png"),
+            loadSprite("assets/nine.png"),
+        },
     };
 }
 
@@ -377,6 +399,9 @@ pub const GameState = struct {
 
     in_menu: bool,
     paused: bool,
+    game_over: bool,
+
+    game_time: f32,
 
     render_queue: RenderQueue,
 
@@ -389,6 +414,8 @@ pub const GameState = struct {
     height: i32,
 
     player: EntityID,
+    score: u32,
+    num_customers: u16,
 
     next_customer: f32,
 
@@ -448,38 +475,34 @@ fn createRoundTable(game_state: *GameState, pos: Vec2) void {
     }
 }
 
-export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var allocator = arena.allocator();
-
-    var temp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var temp_allocator = arena.allocator();
-
-    var game_state: *GameState = allocator.create(GameState) catch {
-        @panic("Failed to allocate game state!");
-    };
-
-    var rng: *std.rand.DefaultPrng = allocator.create(std.rand.DefaultPrng) catch {
-        @panic("Failed to allocate prng");
-    };
-    rng.* = std.rand.DefaultPrng.init(@intCast(timestamp));
-
-    const sprites = loadSprites();
-
-    game_state.* = GameState{
+fn createGameState(
+    arena: std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
+    temp_arena: std.heap.ArenaAllocator,
+    temp_allocator: std.mem.Allocator,
+    rand: std.rand.Random,
+    sprites: Sprites,
+    width: c_int,
+    height: c_int,
+) GameState {
+    return GameState{
         .arena = arena,
         .allocator = allocator,
         .temp_arena = temp_arena,
         .temp_allocator = temp_allocator,
         .in_menu = true,
         .paused = false,
+        .game_over = false,
         .previous_timestamp = 0,
         .width = width,
         .height = height,
         .player = 0,
-        .next_customer = 0,
+        .game_time = 0,
+        .num_customers = 0,
+        .next_customer = customer_spawn_time,
+        .score = 0,
         .sprites = sprites,
-        .rand = rng.random(),
+        .rand = rand,
         .input = .{
             .mouse_pos = .{ 0, 0 },
             .mouse_moving_frames = 0,
@@ -496,6 +519,51 @@ export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
         .colliders = .{},
         .entities = std.mem.zeroes([max_entities]Entity),
     };
+}
+
+fn reset(_game_state: ?*GameState, width: c_int, height: c_int, timestamp: c_int) *GameState {
+    var game_state = _game_state orelse gs: {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var allocator = arena.allocator();
+
+        var temp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var temp_allocator = arena.allocator();
+
+        var game_state: *GameState = allocator.create(GameState) catch {
+            @panic("Failed to allocate game state!");
+        };
+
+        var rng: *std.rand.DefaultPrng = allocator.create(std.rand.DefaultPrng) catch {
+            @panic("Failed to allocate prng");
+        };
+        rng.* = std.rand.DefaultPrng.init(@intCast(timestamp));
+
+        const sprites = loadSprites();
+
+        game_state.* = createGameState(
+            arena,
+            allocator,
+            temp_arena,
+            temp_allocator,
+            rng.random(),
+            sprites,
+            width,
+            height,
+        );
+
+        break :gs game_state;
+    };
+
+    game_state.* = createGameState(
+        game_state.arena,
+        game_state.allocator,
+        game_state.temp_arena,
+        game_state.temp_allocator,
+        game_state.rand,
+        game_state.sprites,
+        width,
+        height,
+    );
 
     game_state.player = entities.createPlayer(game_state);
 
@@ -507,7 +575,7 @@ export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
             .pos = .{ 200, h / 2.0 },
             .size = .{ 100, 420 },
             .shape = .rect,
-            .sprite = sprites.counter,
+            .sprite = game_state.sprites.counter,
             .collider = .{
                 .shape = .{ .aabb = .{ 75, 400 } },
                 .mask = .terrain,
@@ -525,7 +593,7 @@ export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
                 .pos = pos,
                 .size = long_table_size,
                 .shape = .rect,
-                .sprite = sprites.long_table,
+                .sprite = game_state.sprites.long_table,
                 .collider = .{
                     .shape = .{ .aabb = long_table_collider_size },
                     .mask = .terrain,
@@ -603,6 +671,10 @@ export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
         });
     }
     return game_state;
+}
+
+export fn onInit(width: c_int, height: c_int, timestamp: c_int) *GameState {
+    return reset(null, width, height, timestamp);
 }
 
 //------------------------------
@@ -706,21 +778,17 @@ fn processMenu(game_state: *GameState, delta: f32) void {
     );
 
     //- ojf: draw mouse
-    if (game_state.input.mouse_l_down) {
+    {
+        const sprite = if (game_state.input.mouse_l_down)
+            game_state.sprites.cursor_closed
+        else
+            game_state.sprites.cursor_open;
         render.drawSprite(
             game_state,
             game_state.input.mouse_pos,
             @splat(cursor_size),
             100,
-            game_state.sprites.cursor_closed,
-        );
-    } else {
-        render.drawSprite(
-            game_state,
-            game_state.input.mouse_pos,
-            @splat(cursor_size),
-            100,
-            game_state.sprites.cursor_open,
+            sprite,
         );
     }
 
@@ -781,7 +849,7 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
         return;
     }
 
-    const paused_this_frame = game_state.paused;
+    const paused_this_frame = game_state.paused or game_state.game_over;
 
     //- ojf: create render queue.  we safely discard the existing queue,
     // because all of its underlying memory was dealloced at the end of
@@ -792,6 +860,8 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
 
     //- ojf: update entities
     if (!paused_this_frame) {
+        game_state.game_time += delta;
+
         entities.spawnCustomers(game_state, delta);
 
         render.drawSprite(
@@ -828,7 +898,7 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
         command.execute();
     }
 
-    if (paused_this_frame) {
+    if (paused_this_frame and game_state.paused and !game_state.game_over) {
         render.drawSpriteImmediate(
             Vec2{
                 @as(f32, @floatFromInt(game_state.width)) / 2.0,
@@ -881,6 +951,57 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
             recipe_size,
             game_state.sprites.recipe_poop,
         );
+    }
+
+    if (paused_this_frame and game_state.game_over) {
+        render.drawSpriteImmediate(
+            Vec2{
+                @as(f32, @floatFromInt(game_state.width)) / 2.0,
+                @as(f32, @floatFromInt(game_state.height)) / 2.0,
+            },
+            Vec2{
+                @as(f32, @floatFromInt(game_state.width)),
+                @as(f32, @floatFromInt(game_state.height)),
+            },
+            game_state.sprites.game_over,
+        );
+
+        render.drawNumberImmediate(
+            game_state,
+            Vec2{ 596, 215 },
+            game_state.score,
+        );
+
+        //- ojf: draw mouse
+        {
+            const sprite = if (game_state.input.mouse_l_down)
+                game_state.sprites.cursor_closed
+            else
+                game_state.sprites.cursor_open;
+            render.drawSpriteImmediate(
+                game_state.input.mouse_pos,
+                @splat(cursor_size),
+                sprite,
+            );
+        }
+
+        if (game_state.input.isMouseHoveringRect(replay_button_pos, replay_button_size)) {
+            render.drawSpriteImmediate(
+                replay_button_pos,
+                replay_button_size,
+                game_state.sprites.play_button_hover,
+            );
+
+            if (game_state.input.wasLeftMouseClicked()) {
+                _ = reset(game_state, game_state.width, game_state.height, timestamp);
+            }
+        } else {
+            render.drawSpriteImmediate(
+                replay_button_pos,
+                replay_button_size,
+                game_state.sprites.play_button,
+            );
+        }
     }
 
     //- ojf: reset arena

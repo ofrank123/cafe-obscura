@@ -7,6 +7,9 @@ const Vec2 = main.Vec2;
 const GameState = main.GameState;
 const Color = main.Color;
 
+const digit_size = 48;
+const digit_spacing = 32;
+
 //------------------------------
 //~ ojf: render commands
 
@@ -213,6 +216,88 @@ pub const RenderQueue = struct {
         return ret;
     }
 };
+
+inline fn drawDigit(
+    game_state: *GameState,
+    immediate: bool,
+    pos: Vec2,
+    z_index: i8,
+    digit: u8,
+) void {
+    if (immediate) {
+        drawSpriteImmediate(
+            pos,
+            @splat(digit_size),
+            game_state.sprites.digits[digit],
+        );
+    } else {
+        drawSprite(
+            game_state,
+            pos,
+            @splat(digit_size),
+            z_index,
+            game_state.sprites.digits[digit],
+        );
+    }
+}
+
+fn _drawNumber(
+    game_state: *GameState,
+    pos: Vec2,
+    z_index: i8,
+    number: u32,
+    immediate: bool,
+) void {
+    if (number == 0) {
+        drawDigit(game_state, immediate, pos, z_index, 0);
+        return;
+    }
+
+    var buf = [_]u8{0} ** 128;
+    var stack_fba = std.heap.FixedBufferAllocator.init(
+        &buf,
+    );
+    var allocator = stack_fba.allocator();
+    var stack = std.ArrayList(u8).init(allocator);
+
+    var tmp_score = number;
+    while (tmp_score > 0) {
+        var digit: u8 = @truncate(tmp_score % 10);
+        stack.append(digit) catch unreachable;
+        tmp_score /= 10;
+    }
+
+    var i: f32 = 0;
+    while (stack.popOrNull()) |digit| : (i += 1) {
+        drawDigit(
+            game_state,
+            immediate,
+            Vec2{
+                pos[0] + i * digit_spacing,
+                pos[1],
+            },
+            z_index,
+            digit,
+        );
+    }
+}
+
+pub fn drawNumber(
+    game_state: *GameState,
+    pos: Vec2,
+    z_index: i8,
+    number: u32,
+) void {
+    _drawNumber(game_state, pos, z_index, number, false);
+}
+
+pub fn drawNumberImmediate(
+    game_state: *GameState,
+    pos: Vec2,
+    number: u32,
+) void {
+    _drawNumber(game_state, pos, 0, number, true);
+}
 
 //------------------------------
 //~ ojf: rendering helpers

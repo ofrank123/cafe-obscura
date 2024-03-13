@@ -16,6 +16,8 @@ const hud_health_offset = 48;
 const hud_health_spacing = 8;
 const hud_heart_size = 48;
 
+const hud_digit_offset = 48;
+
 pub fn drawHud(game_state: *GameState) void {
     const player = game_state.getPlayer();
 
@@ -24,16 +26,28 @@ pub fn drawHud(game_state: *GameState) void {
         @floatFromInt(game_state.height),
     };
 
-    for (0..player.health) |i| {
-        const heart_pos = top_right - splatF(hud_health_offset) -
-            Vec2{ @floatFromInt(i * (hud_health_spacing + hud_heart_size)), 0 };
-        render.drawSpriteRot(
+    { //- ojf: health
+        for (0..player.health) |i| {
+            const heart_pos = top_right - splatF(hud_health_offset) -
+                Vec2{ @floatFromInt(i * (hud_health_spacing + hud_heart_size)), 0 };
+            render.drawSpriteRot(
+                game_state,
+                heart_pos,
+                @splat(hud_heart_size),
+                -0.125 * std.math.pi,
+                hud_zindex,
+                game_state.sprites.heart,
+            );
+        }
+    }
+
+    { //- ojf: score
+        //- ojf: don't really want to allocate for this...
+        render.drawNumber(
             game_state,
-            heart_pos,
-            @splat(hud_heart_size),
-            -0.125 * std.math.pi,
+            Vec2{ hud_digit_offset, @as(f32, @floatFromInt(game_state.height)) - hud_digit_offset },
             hud_zindex,
-            game_state.sprites.heart,
+            game_state.score,
         );
     }
 }
