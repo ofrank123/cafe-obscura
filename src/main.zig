@@ -42,10 +42,12 @@ pub const cooking_time = 5;
 pub const ingredient_spin_speed = 0.5;
 pub const dish_size = 48;
 
-pub const customer_spawn_time = 8;
+pub const customer_spawn_time = 11;
+pub const customer_decrease_spawn_time_wait = 100;
+pub const customer_min_spawn_time = 5;
 pub const customer_spawn_chance = 1.0;
-pub const customer_min_spawn_chance = 0.25;
-pub const customer_spawn_period = 120.0;
+pub const customer_min_spawn_chance = 0.35;
+pub const customer_spawn_period = 100.0;
 pub const customer_spawn_cap = 5;
 
 pub const customer_size = 80;
@@ -55,7 +57,7 @@ pub const customer_dialog_size = Vec2{ 80, 64 };
 pub const customer_dialog_offset = 60;
 pub const customer_fire_time = 3;
 pub const customer_circle_fire_time = 0.5;
-pub const customer_safe_radius = 100;
+pub const customer_safe_radius = 150;
 pub const customer_throw_velocity = 100;
 
 pub const seat_size = 32;
@@ -238,6 +240,30 @@ const InputState = struct {
     }
 };
 
+pub const SoundID = u32;
+
+pub const Sounds = struct {
+    music: SoundID,
+    cooking: SoundID,
+    pop_in: SoundID,
+    shoot: SoundID,
+    coins: SoundID,
+};
+
+fn loadSound(path: []const u8) SoundID {
+    return bind.loadAudio(&path[0], path.len);
+}
+
+fn loadSounds() Sounds {
+    return Sounds{
+        .music = loadSound("assets/CafeObscura_theme.mp3"),
+        .cooking = loadSound("assets/bubbling.mp3"),
+        .pop_in = loadSound("assets/cork_pop.mp3"),
+        .shoot = loadSound("assets/shoot.mp3"),
+        .coins = loadSound("assets/coins.mp3"),
+    };
+}
+
 pub const TextureID = u32;
 
 pub const Sprites = struct {
@@ -288,6 +314,7 @@ pub const Sprites = struct {
     recipe_tentacles: TextureID,
     digits: [10]TextureID,
     game_over: TextureID,
+    tutorial: TextureID,
 };
 
 fn loadSprite(path: []const u8) TextureID {
@@ -342,6 +369,7 @@ fn loadSprites() Sprites {
         .recipe_tentacles = loadSprite("assets/tentacles_recipe.png"),
         .recipe_poop = loadSprite("assets/poop_recipe.png"),
         .game_over = loadSprite("assets/game_over.png"),
+        .tutorial = loadSprite("assets/tutorial.png"),
         .digits = [10]TextureID{
             loadSprite("assets/zero.png"),
             loadSprite("assets/one.png"),
@@ -398,6 +426,7 @@ pub const GameState = struct {
     temp_allocator: std.mem.Allocator,
 
     in_menu: bool,
+    in_tutorial: bool,
     paused: bool,
     game_over: bool,
 
@@ -405,6 +434,7 @@ pub const GameState = struct {
 
     render_queue: RenderQueue,
 
+    sounds: Sounds,
     sprites: Sprites,
 
     rand: std.rand.Random,
@@ -416,8 +446,14 @@ pub const GameState = struct {
     player: EntityID,
     score: u32,
     num_customers: u16,
+    stoves_cooking: u16,
+    customer_spawn_time: f32,
+    next_decrease_spawn_time: f32,
 
     next_customer: f32,
+
+    //- ojf: music
+    music_played: bool,
 
     colliders: ColliderList,
     entities: [max_entities]Entity,
@@ -481,6 +517,7 @@ fn createGameState(
     temp_arena: std.heap.ArenaAllocator,
     temp_allocator: std.mem.Allocator,
     rand: std.rand.Random,
+    sounds: Sounds,
     sprites: Sprites,
     width: c_int,
     height: c_int,
@@ -491,6 +528,7 @@ fn createGameState(
         .temp_arena = temp_arena,
         .temp_allocator = temp_allocator,
         .in_menu = true,
+        .in_tutorial = false,
         .paused = false,
         .game_over = false,
         .previous_timestamp = 0,
@@ -499,8 +537,13 @@ fn createGameState(
         .player = 0,
         .game_time = 0,
         .num_customers = 0,
+        .stoves_cooking = 0,
         .next_customer = customer_spawn_time,
         .score = 0,
+        .customer_spawn_time = customer_spawn_time,
+        .next_decrease_spawn_time = customer_decrease_spawn_time_wait,
+        .music_played = false,
+        .sounds = sounds,
         .sprites = sprites,
         .rand = rand,
         .input = .{
@@ -538,6 +581,7 @@ fn reset(_game_state: ?*GameState, width: c_int, height: c_int, timestamp: c_int
         };
         rng.* = std.rand.DefaultPrng.init(@intCast(timestamp));
 
+        const sounds = loadSounds();
         const sprites = loadSprites();
 
         game_state.* = createGameState(
@@ -546,6 +590,7 @@ fn reset(_game_state: ?*GameState, width: c_int, height: c_int, timestamp: c_int
             temp_arena,
             temp_allocator,
             rng.random(),
+            sounds,
             sprites,
             width,
             height,
@@ -560,12 +605,18 @@ fn reset(_game_state: ?*GameState, width: c_int, height: c_int, timestamp: c_int
         game_state.temp_arena,
         game_state.temp_allocator,
         game_state.rand,
+        game_state.sounds,
         game_state.sprites,
         width,
         height,
     );
 
     game_state.player = entities.createPlayer(game_state);
+
+    //- ojf: stop old sounds
+    {
+        bind.stopAudio(game_state.sounds.cooking);
+    }
 
     {
         const h: f32 = @floatFromInt(game_state.height);
@@ -706,7 +757,6 @@ fn handleKeyEvent(
             }
         },
         .mouse_l => {
-            dlog("{d:.2}", .{input_state.mouse_pos});
             input_state.mouse_l_down = state;
             if (state) {
                 input_state.mouse_l_clicked_frames = mouse_clicked_frames;
@@ -742,6 +792,13 @@ export fn handleMouse(
     x: f32,
     y: f32,
 ) void {
+
+    //- ojf: for some browsers, we need a click before we can play music
+    if (!game_state.music_played) {
+        game_state.music_played = true;
+        bind.playAudio(game_state.sounds.music, 0.8, true);
+    }
+
     game_state.input.mouse_moving_frames = mouse_moving_frames;
 
     game_state.input.mouse_pos = game_state.input.mouse_pos + Vec2{ x, -y };
@@ -803,6 +860,7 @@ fn processMenu(game_state: *GameState, delta: f32) void {
 
         if (game_state.input.wasLeftMouseClicked()) {
             game_state.in_menu = false;
+            game_state.in_tutorial = true;
         }
     } else {
         render.drawSprite(
@@ -812,6 +870,56 @@ fn processMenu(game_state: *GameState, delta: f32) void {
             10,
             game_state.sprites.play_button,
         );
+    }
+
+    bind.clear();
+
+    var render_queue_iter = render.RenderQueueIter.init(game_state.render_queue);
+    while (render_queue_iter.next()) |command| {
+        command.execute();
+    }
+
+    if (!game_state.temp_arena.reset(.retain_capacity)) {
+        std.log.warn("Failed to reset temporary arena!", .{});
+    }
+}
+
+fn processTutorial(game_state: *GameState, delta: f32) void {
+    _ = delta;
+    game_state.render_queue = RenderQueue.init(game_state.temp_allocator);
+
+    //- ojf: draw background
+    render.drawSprite(
+        game_state,
+        Vec2{
+            @as(f32, @floatFromInt(game_state.width)) / 2.0,
+            @as(f32, @floatFromInt(game_state.height)) / 2.0,
+        },
+        Vec2{
+            @floatFromInt(game_state.width),
+            @floatFromInt(game_state.height),
+        },
+        -10,
+        game_state.sprites.tutorial,
+    );
+
+    //- ojf: draw mouse
+    {
+        const sprite = if (game_state.input.mouse_l_down)
+            game_state.sprites.cursor_closed
+        else
+            game_state.sprites.cursor_open;
+        render.drawSprite(
+            game_state,
+            game_state.input.mouse_pos,
+            @splat(cursor_size),
+            100,
+            sprite,
+        );
+    }
+
+    if (game_state.input.wasLeftMouseClicked()) {
+        game_state.in_tutorial = false;
     }
 
     bind.clear();
@@ -847,6 +955,9 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
     if (game_state.in_menu) {
         processMenu(game_state, delta);
         return;
+    } else if (game_state.in_tutorial) {
+        processTutorial(game_state, delta);
+        return;
     }
 
     const paused_this_frame = game_state.paused or game_state.game_over;
@@ -861,6 +972,16 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
     //- ojf: update entities
     if (!paused_this_frame) {
         game_state.game_time += delta;
+
+        if (game_state.customer_spawn_time > customer_min_spawn_time) {
+            if (game_state.next_decrease_spawn_time >= 0) {
+                game_state.next_decrease_spawn_time -= delta;
+            } else {
+                game_state.customer_spawn_time -= 1;
+                game_state.next_decrease_spawn_time = customer_decrease_spawn_time_wait;
+                dlog("CHANGING SPAWN TIMER: {d:.2}", .{game_state.customer_spawn_time});
+            }
+        }
 
         entities.spawnCustomers(game_state, delta);
 
@@ -972,19 +1093,6 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
             game_state.score,
         );
 
-        //- ojf: draw mouse
-        {
-            const sprite = if (game_state.input.mouse_l_down)
-                game_state.sprites.cursor_closed
-            else
-                game_state.sprites.cursor_open;
-            render.drawSpriteImmediate(
-                game_state.input.mouse_pos,
-                @splat(cursor_size),
-                sprite,
-            );
-        }
-
         if (game_state.input.isMouseHoveringRect(replay_button_pos, replay_button_size)) {
             render.drawSpriteImmediate(
                 replay_button_pos,
@@ -1000,6 +1108,19 @@ export fn onAnimationFrame(game_state: *GameState, timestamp: c_int) void {
                 replay_button_pos,
                 replay_button_size,
                 game_state.sprites.play_button,
+            );
+        }
+
+        //- ojf: draw mouse
+        {
+            const sprite = if (game_state.input.mouse_l_down)
+                game_state.sprites.cursor_closed
+            else
+                game_state.sprites.cursor_open;
+            render.drawSpriteImmediate(
+                game_state.input.mouse_pos,
+                @splat(cursor_size),
+                sprite,
             );
         }
     }

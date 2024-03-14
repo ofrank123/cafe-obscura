@@ -18,6 +18,11 @@ pub const KeyCode = enum(i32) {
 // --- DEBUG ---
 pub extern fn logExt(log_ptr: *const u8, log_len: c_uint, level: c_uint) void;
 
+// --- SOUND ---
+pub extern fn loadAudio(source: *const u8, len: c_uint) c_uint;
+pub extern fn playAudio(sound_id: c_uint, volume: f32, loop: bool) void;
+pub extern fn stopAudio(sound_id: c_uint) void;
+
 // --- GRAPHICS ---
 /// Clear the screen
 pub extern fn clear() void;

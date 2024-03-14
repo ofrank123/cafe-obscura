@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const main = @import("./main.zig");
 const collision = @import("./collision.zig");
 const render = @import("./render.zig");
-const b = @import("./bindings.zig");
+const bind = @import("./bindings.zig");
 
 const Vec2 = main.Vec2;
 const splatF = main.splatF;
@@ -463,6 +463,11 @@ pub fn processStove(self: *Entity, game_state: *GameState, delta: f32) void {
         if (state.cook_time > 0) {
             state.cook_time -= delta;
         } else {
+            game_state.stoves_cooking -= 1;
+            if (game_state.stoves_cooking <= 0) {
+                bind.stopAudio(game_state.sounds.cooking);
+            }
+
             //- ojf: yandere dev-style recipes
             var ingredients_red: u32 = 0;
             var ingredients_green: u32 = 0;
@@ -551,7 +556,7 @@ pub fn addIngredientToStove(stove: *Entity, ingredient: Ingredient) bool {
     return true;
 }
 
-pub fn beginCooking(stove: *Entity) void {
+pub fn beginCooking(game_state: *GameState, stove: *Entity) void {
     if (stove.tag != .stove) {
         std.log.warn("Can't begin cooking on non-stove entity!", .{});
     }
@@ -559,6 +564,10 @@ pub fn beginCooking(stove: *Entity) void {
     if (!stove.cooking_state.cooking and
         stove.cooking_state.num_ingredients > 0)
     {
+        if (game_state.stoves_cooking <= 0) {
+            bind.playAudio(game_state.sounds.cooking, 0.5, true);
+        }
+        game_state.stoves_cooking += 1;
         stove.cooking_state.cooking = true;
         stove.cooking_state.cook_time = main.cooking_time;
     }
@@ -706,7 +715,7 @@ pub fn spawnCustomers(game_state: *GameState, delta: f32) void {
     if (game_state.next_customer >= 0) {
         game_state.next_customer -= delta;
     } else {
-        game_state.next_customer = main.customer_spawn_time;
+        game_state.next_customer = game_state.customer_spawn_time;
 
         const spawn_roll = game_state.rand.float(f32);
 
@@ -742,9 +751,9 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
     const tag: CustomerTag = t: {
         var roll = game_state.rand.float(f32);
         if (roll < 0.1) {
-            break :t .circle;
-        } else if (roll < 0.4) {
             break :t .triple;
+        } else if (roll < 0.4) {
+            break :t .circle;
         } else {
             break :t .single;
         }
@@ -783,6 +792,7 @@ pub fn createCustomer(game_state: *GameState, seat_id: EntityID) void {
     const seat = game_state.getEntity(seat_id);
     seat.seat_data.?.occupied = true;
 
+    bind.playAudio(game_state.sounds.pop_in, 0.6, false);
     game_state.num_customers += 1;
 
     _ = createEntity(game_state, Entity{
@@ -884,6 +894,8 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                 }
                 const player = game_state.getPlayer();
 
+                bind.playAudio(game_state.sounds.shoot, 0.7, false);
+
                 //- ojf: only fire if outside of safe radius
                 if (main.mag(player.pos - customer.pos) > main.customer_safe_radius) {
                     switch (data.tag) {
@@ -948,6 +960,7 @@ pub fn processCustomer(customer: *Entity, game_state: *GameState, delta: f32) vo
                     .soup, .tentacles => 3,
                     .bigballs, .organ => 5,
                 };
+                bind.playAudio(game_state.sounds.coins, 0.7, false);
                 customer.destroy(game_state);
                 seat.seat_data.?.occupied = false;
                 seat.dish = null;
@@ -1084,7 +1097,7 @@ fn processPlayer(player: *Entity, game_state: *GameState, delta: f32) void {
                         continue;
                     }
 
-                    beginCooking(stove);
+                    beginCooking(game_state, stove);
                 }
             }
         }

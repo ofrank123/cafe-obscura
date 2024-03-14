@@ -138,6 +138,7 @@ let quadTextureCoordBuffer;
 
 const glUniformLocations = [];
 const textures = [];
+const sounds = [];
 
 // --- WebGL ---
 
@@ -325,6 +326,30 @@ function createShaderProgram(vertexShaderSource, fragmentShaderSource) {
     );
 
     return linkShaderProgram(vertexShaderId, fragmentShaderId);
+}
+
+function loadAudio(url_ptr, url_len) {
+    const url = readCharStr(url_ptr, url_len);
+    const audio = new Audio(url);
+
+    sounds.push(audio);
+    return sounds.length - 1;
+}
+
+function playAudio(sound_id, volume, loop) {
+    if (loop) {
+        sounds[sound_id].loop = true;
+    }
+    if (sounds[sound_id].paused) {
+        sounds[sound_id].volume = volume;
+        sounds[sound_id].play();
+    } else {
+        sounds[sound_id].currentTime = 0;
+    }
+}
+
+function stopAudio(sound_id) {
+    sounds[sound_id].pause();
 }
 
 function loadTexture(url_ptr, url_len) {
@@ -550,6 +575,9 @@ function clear() {
 }
 
 const env = {
+    loadAudio,
+    playAudio,
+    stopAudio,
     loadTexture,
     logExt,
     drawTextureRect,
